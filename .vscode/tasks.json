@@ -1,0 +1,15 @@
+{
+  // Runs before every "mobile" debug launch so the phone's localhost:5050 reaches this computer's API.
+  // (The mapping is lost whenever the USB connection drops, so it is re-applied on each launch.)
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "VSR: adb reverse",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/mobile/tool/adb_reverse.ps1"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true }
+    }
+  ]
+}

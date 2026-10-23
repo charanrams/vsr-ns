@@ -1,0 +1,38 @@
+# Dependencies & builds
+node_modules/
+dist/
+coverage/
+*.log
+
+# Secrets (examples are committed)
+.env
+.env.*
+!.env.example
+
+# Flutter / Dart
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.pub-cache/
+mobile/.pub/
+
+# Android
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/key.properties
+mobile/android/app/release/
+*.jks
+*.keystore
+
+# iOS
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/flutter_export_environment.sh
+
+# Editors / OS
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
