@@ -203,10 +203,17 @@ export default function ShopLayout() {
   const isHome = loc.pathname === '/';
   const nav = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+  // Phones: bottom tabs tuck away while scrolling down; the cart bar drops into their place
+  const [tabsHidden, setTabsHidden] = useState(false);
 
   useEffect(() => {
+    let lastY = window.scrollY;
     const onScroll = () => {
-      setScrolled(window.scrollY > 20);
+      const y = window.scrollY;
+      setScrolled(y > 20);
+      if (Math.abs(y - lastY) < 8) return;
+      setTabsHidden(y > lastY && y > 80);
+      lastY = y;
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -216,12 +223,18 @@ export default function ShopLayout() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
     setScrolled(false);
+    setTabsHidden(false);
   }, [loc.pathname]);
   const hideCartBar = ['/cart', '/checkout'].some((p) => loc.pathname.startsWith(p));
   // Bottom-tab destinations: no back button on phones
-  const isTabRoot = ['/categories', '/account', '/account/orders'].includes(loc.pathname);
+  // The order-placed screen moves on by itself, so it gets no back button either
+  const isTabRoot = ['/categories', '/account', '/account/orders'].includes(loc.pathname) || loc.pathname.startsWith('/order-placed');
   // Product page draws its own floating back button over a full-bleed image
   const isProductPage = /^\/product\/[^/]+$/.test(loc.pathname);
+  // Cart and checkout pin their own bottom bar (Checkout / Place order), so the tabs step aside
+  const isCheckout = loc.pathname.startsWith('/checkout') || loc.pathname === '/cart' || loc.pathname.startsWith('/order-placed') || /^\/account\/addresses\/[^/]+$/.test(loc.pathname);
+  // Same rule as the app: tabs only hide when the cart bar is there to take their place
+  const hideTabs = tabsHidden && count > 0 && !hideCartBar;
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -343,8 +356,11 @@ export default function ShopLayout() {
 
       {/* Phones: floating cart bar + bottom tabs (mirrors the app) */}
       {/* Product page has its own bottom buy bar instead of tabs */}
-      <div className={cx('fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),10px)] md:hidden', isProductPage && 'hidden')}>
-        {!hideCartBar ? <FloatingCartBar className="mb-2" /> : null}
+      <div className={cx('fixed inset-x-0 bottom-0 z-30 px-3 pb-[max(env(safe-area-inset-bottom),10px)] md:hidden', (isProductPage || isCheckout) && 'hidden')}>
+        {!hideCartBar ? <FloatingCartBar className={cx('transition-[margin] duration-300 ease-out motion-reduce:transition-none', !hideTabs && 'mb-2')} /> : null}
+        {/* Collapses to zero height (grid-rows trick) so the cart bar slides down into the tabs' spot */}
+        <div className={cx('grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none', hideTabs ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100')} {...(hideTabs ? { inert: '' } : {})}>
+        <div className="min-h-0 overflow-hidden">
         <nav aria-label="Main" className="flex rounded-[28px] border border-line bg-surface p-1.5 shadow-[0_10px_30px_-12px_rgb(0_0_0/0.3)]">
           {TABS.map(({ to, label, icon: Icon, end }) => (
             <NavLink
@@ -362,6 +378,8 @@ export default function ShopLayout() {
             </NavLink>
           ))}
         </nav>
+        </div>
+        </div>
       </div>
     </div>
   );

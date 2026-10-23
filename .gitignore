@@ -36,3 +36,10 @@ mobile/ios/Flutter/flutter_export_environment.sh
 *.iml
 .DS_Store
 Thumbs.db
+
+# Firebase service account keys (server secrets)
+secrets/
+*service-account*.json
+*firebase-adminsdk*.json
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist

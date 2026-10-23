@@ -259,6 +259,7 @@ void showMessage(BuildContext context, String msg, {bool error = false}) {
           ),
         ),
         backgroundColor: error ? VsrColors.danger : VsrColors.brand900,
+        duration: const Duration(seconds: 2),
       ),
     );
 }
@@ -665,7 +666,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
         child: InkWell(
           onTap: () => context.push('/product/${p.id}'),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -734,6 +735,39 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                                   ),
                                 ),
                               ],
+                            ),
+                          ),
+                        ),
+                      // Out of Stock Badge
+                      if (p.outOfStock)
+                        Positioned(
+                          left: 7,
+                          bottom: 7,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDC2626),
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFDC2626)
+                                      .withValues(alpha: 0.35),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Text(
+                              'Out of stock',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                              ),
                             ),
                           ),
                         ),
@@ -851,7 +885,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           ),
                         ),
                       // Carousel Dots
-                      if (p.images.length > 1)
+                      if (!p.outOfStock && p.images.length > 1)
                         Positioned(
                           bottom: 6,
                           left: 0,
@@ -895,7 +929,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 9),
+                const SizedBox(height: 7),
                 // 2. Title
                 Text(
                   p.name,
@@ -920,7 +954,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 // 4. Rating & Reviews (only when the product has real reviews; otherwise a "New" tag)
                 if (p.reviewCount <= 0)
                   Text(
@@ -968,9 +1002,11 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                       ),
                     ],
                   ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 // 5. Price Row
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
                   children: [
                     Text(
                       money(p.price),
@@ -980,8 +1016,7 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                         fontFeatures: [FontFeature.tabularFigures()],
                       ),
                     ),
-                    if (off > 0) ...[
-                      const SizedBox(width: 6),
+                    if (off > 0)
                       Text(
                         money(p.mrp),
                         style: TextStyle(
@@ -991,65 +1026,19 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
-                    ],
-                    const Spacer(),
-                    if (p.outOfStock)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFDE8E6),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text(
-                          'Out of stock',
-                          style: TextStyle(
-                            color: Color(0xFFC9362B),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 // 6. Action Row
                 if (p.outOfStock)
-                  Row(
-                    children: [
-                      Expanded(child: NotifyMeButton(product: p)),
-                      const SizedBox(width: 6),
-                      Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: _toggleWish,
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              border: Border.all(color: context.vsr.line),
-                              borderRadius: BorderRadius.circular(12),
-                              color: context.vsr.surface,
-                            ),
-                            child: Icon(
-                              wish
-                                  ? Icons.favorite
-                                  : Icons.favorite_border_rounded,
-                              size: 15,
-                              color: wish
-                                  ? const Color(0xFFEF4444)
-                                  : context.vsr.muted,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    height: 36,
+                    child: NotifyMeButton(product: p),
                   )
                 else if (qty > 0)
                   SizedBox(
+                    width: double.infinity,
                     height: 36,
                     child: QtyStepper(
                       qty: qty,
@@ -1060,90 +1049,56 @@ class _ProductTileState extends ConsumerState<ProductTile> {
                     ),
                   )
                 else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 36,
-                          child: ElevatedButton.icon(
-                            onPressed: _busy
-                                ? null
-                                : () {
-                                    if (p.hasSizes) {
-                                      context.push('/product/${p.id}');
-                                    } else {
-                                      _setQty(1);
-                                    }
-                                  },
-                            icon: _busy
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.shopping_cart_outlined,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
-                            label: Text(
-                              p.hasSizes ? 'Select Size' : 'Add to Cart',
-                              style: const TextStyle(
+                  SizedBox(
+                    width: double.infinity,
+                    height: 36,
+                    child: ElevatedButton.icon(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              if (p.hasSizes) {
+                                context.push('/product/${p.id}');
+                              } else {
+                                _setQty(1);
+                              }
+                            },
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
                                 color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
                               ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                              ),
-                              backgroundColor: VsrColors.accent,
-                              foregroundColor: Colors.white,
-                              elevation: 2,
-                              shadowColor: VsrColors.accent.withValues(
-                                alpha: 0.35,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: _busy
-                              ? null
-                              : () {
-                                  if (p.hasSizes) {
-                                    context.push('/product/${p.id}');
-                                  } else {
-                                    _setQty(1);
-                                  }
-                                },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: context.vsr.accent50,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(
+                            )
+                          : const Icon(
                               Icons.shopping_cart_outlined,
                               size: 15,
-                              color: VsrColors.accentDark,
+                              color: Colors.white,
                             ),
-                          ),
+                      label: Text(
+                        p.hasSizes ? 'Select Size' : 'Add to Cart',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                        ),
+                        backgroundColor: VsrColors.accent,
+                        foregroundColor: Colors.white,
+                        elevation: 2,
+                        shadowColor: VsrColors.accent.withValues(
+                          alpha: 0.35,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -1258,7 +1213,7 @@ class ProductRail extends StatelessWidget {
   final List<Product> products;
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 344,
+    height: 314,
     child: ListView.separated(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: VsrSpace.gutter),
@@ -1285,9 +1240,9 @@ class SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(
       VsrSpace.gutter,
-      22.0,
+      16.0,
       VsrSpace.gutter,
-      10.0,
+      8.0,
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1414,10 +1369,13 @@ class BillRow extends StatelessWidget {
     super.key,
     this.bold = false,
     this.color,
+    this.was,
   });
   final String label, value;
   final bool bold;
   final Color? color;
+  /// Old value shown struck through before [value] (e.g. the delivery fee that free delivery saved)
+  final String? was;
   @override
   Widget build(BuildContext context) {
     final s = bold
@@ -1433,6 +1391,10 @@ class BillRow extends StatelessWidget {
               style: s?.copyWith(color: bold ? null : context.vsr.muted),
             ),
           ),
+          if (was != null) ...[
+            Text(was!, style: s?.copyWith(color: context.vsr.muted, decoration: TextDecoration.lineThrough)),
+            const SizedBox(width: 6),
+          ],
           Text(
             value,
             style: s?.copyWith(
@@ -1447,9 +1409,11 @@ class BillRow extends StatelessWidget {
 }
 
 class BillCard extends StatelessWidget {
-  const BillCard({super.key, required this.totals, this.count});
+  const BillCard({super.key, required this.totals, this.count, this.standardDeliveryFee = 0});
   final Totals totals;
   final int? count;
+  /// Shown struck through next to FREE, so the customer sees what free delivery saved
+  final num standardDeliveryFee;
   @override
   Widget build(BuildContext context) => Card(
     child: Padding(
@@ -1478,6 +1442,7 @@ class BillCard extends StatelessWidget {
             'Delivery Fee',
             totals.deliveryFee == 0 ? 'FREE' : money(totals.deliveryFee),
             color: totals.deliveryFee == 0 ? context.vsr.success : null,
+            was: totals.deliveryFee == 0 && standardDeliveryFee > 0 ? money(standardDeliveryFee) : null,
           ),
           BillRow('Packaging Fee', money(totals.packagingFee)),
           BillRow('GST (included)', money(totals.tax)),
@@ -1568,31 +1533,38 @@ class BottomCta extends StatelessWidget {
   final Widget child;
   final Widget? leading;
   @override
-  Widget build(BuildContext context) => Material(
-    // Hairline instead of a heavy shadow: the bar is separated, not floating
-    color: context.vsr.surface,
-    shape: Border(top: BorderSide(color: context.vsr.line)),
-    child: SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          VsrSpace.gutter,
-          VsrSpace.md,
-          VsrSpace.gutter,
-          VsrSpace.md,
-        ),
-        child: Row(
-          children: [
-            if (leading != null) ...[
-              leading!,
-              const SizedBox(width: VsrSpace.lg),
-            ],
-            Expanded(child: child),
-          ],
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    return Material(
+      color: context.vsr.surface,
+      shape: Border(top: BorderSide(color: context.vsr.line)),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            VsrSpace.gutter,
+            10,
+            VsrSpace.gutter,
+            bottomInset > 0 ? 4 : 12,
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (leading != null) ...[
+                  leading!,
+                  const SizedBox(width: VsrSpace.lg),
+                ],
+                Expanded(child: SizedBox.expand(child: child)),
+              ],
+            ),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class Busy extends StatelessWidget {

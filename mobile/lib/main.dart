@@ -5,10 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme.dart';
 import 'router.dart';
 import 'state/providers.dart';
+import 'state/push.dart';
 import 'state/realtime.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Push notifications; the app still runs if Firebase can't start
+  await initFirebase();
 
   // Safety net: an async error nobody awaited (e.g. a failed tap handler) is logged with its
   // stack instead of surfacing as an unhandled exception. Screens still show their own errors.
@@ -26,6 +29,8 @@ class VsrApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Keep the live-updates socket open for the whole app run
     ref.watch(realtimeProvider);
+    // Push notifications: permission, device token, foreground banners, tap → screen
+    ref.watch(pushProvider);
     return MaterialApp.router(
         title: 'VSR',
         debugShowCheckedModeBanner: false,

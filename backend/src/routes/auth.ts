@@ -15,9 +15,10 @@ const authLimiter = rateLimit({ windowMs: 15 * 60e3, limit: 30, standardHeaders:
 const otpLimiter = rateLimit({ windowMs: 10 * 60e3, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: { code: 'rate_limited', message: 'Too many OTP requests. Please wait a few minutes.' } } });
 
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+// Indian mobile: keep the last 10 digits, whatever prefix was typed or autofilled (+91, 0, +1 91…)
 const normalizePhone = (s: string) => {
   const d = s.replace(/\D/g, '');
-  return d.length === 10 ? `+91${d}` : d.length === 12 && d.startsWith('91') ? `+${d}` : s.trim();
+  return d.length >= 10 ? `+91${d.slice(-10)}` : s.trim();
 };
 const identifierQuery = (id: string) => (isEmail(id) ? { email: id.toLowerCase().trim() } : { phone: normalizePhone(id) });
 

@@ -7,15 +7,18 @@ import { Banner, Coupon, Kitchen, Notification, SupportTicket, DeliveryPartner }
 import { User } from '../models/User';
 import { ah, parse, paginate, escapeRegex, badRequest, notFound, conflict, forbidden } from '../utils/http';
 import { authenticate, requireCustomer } from '../middleware/auth';
-import { priceCart, nextOrderNumber, assertTransition, variantFor, lineKey } from '../utils/orders';
+import { priceCart, nextOrderNumber, FREE_DELIVERY_ABOVE, DELIVERY_FEE, assertTransition, variantFor, lineKey } from '../utils/orders';
 import multer from 'multer';
 import { StockAlert } from '../utils/restock';
+import { pushToStaff } from '../utils/push';
 import { categoryRowAuto, getHomeLayout, homeCategories, sectionProducts, type SectionKey } from '../utils/homeLayout';
 import { razorpay, verifyRazorpaySignature, notify, sendMail, otpEmail, uploadImage } from '../utils/services';
 import { createOtp, consumeOtp } from '../utils/security';
 import { env, features, isProd } from '../config/env';
 
 const r = Router();
+/** A customer's notifications: their own + store-wide broadcasts they haven't cleared */
+const mine = (uid: string) => ({ $or: [{ recipient: uid }, { audience: 'all_customers' }], hiddenBy: { $ne: uid } });
 const activeProduct = { status: 'active' };
 
 // ------------------------------ Public catalogue ------------------------------
@@ -29,6 +32,13 @@ r.get('/config', (_req, res) => {
     app: { minVersion: env.APP_MIN_VERSION, latestVersion: env.APP_LATEST_VERSION, unsupportedBelow: env.APP_UNSUPPORTED_BELOW },
     maintenance: { enabled: env.MAINTENANCE_MODE === 'true', message: env.MAINTENANCE_MESSAGE },
     support: { phone: '+919876543210', email: 'support@vsr.in' },
+    // Browser push (lib/push.ts on the website); null = off
+    webPush: features.webPush
+      ? {
+          config: { apiKey: env.FIREBASE_WEB_API_KEY, authDomain: env.FIREBASE_AUTH_DOMAIN, projectId: env.FIREBASE_PROJECT_ID, messagingSenderId: env.FIREBASE_MESSAGING_SENDER_ID, appId: env.FIREBASE_WEB_APP_ID },
+          vapidKey: env.FIREBASE_VAPID_KEY,
+        }
+      : null,
   });
 });
 
@@ -242,7 +252,7 @@ async function cartView(customer: string) {
     const line = cart.items.find((c) => lineKey(c) === lineKey(it));
     return line?.priceAtAdd != null && line.priceAtAdd !== it.unitPrice ? [{ key: lineKey(it), product: String(it.product), name: it.name, was: line.priceAtAdd, now: it.unitPrice }] : [];
   });
-  return { ...priced, items: priced.items.map((it) => ({ ...it, previousPrice: priceChanges.find((x) => x.key === lineKey(it))?.was ?? null })), priceChanges, couponCode: cart.couponCode ?? null };
+  return { ...priced, items: priced.items.map((it) => ({ ...it, previousPrice: priceChanges.find((x) => x.key === lineKey(it))?.was ?? null })), priceChanges, couponCode: cart.couponCode ?? null, delivery: { freeAbove: FREE_DELIVERY_ABOVE, fee: DELIVERY_FEE } };
 }
 c.get('/cart', ah(async (req, res) => res.json(await cartView(req.user!.id))));
 c.put(
@@ -331,7 +341,8 @@ c.post(
     }
     if (view.totals.couponCode) await Coupon.updateOne({ code: view.totals.couponCode }, { $inc: { used: 1 } });
     await Cart.updateOne({ customer: user._id }, { items: [], couponCode: null });
-    await notify(String(user._id), 'Order placed', `Your order #${orderNumber} has been placed and is awaiting confirmation.`);
+    await notify(String(user._id), 'Order placed', `Your order #${orderNumber} has been placed and is awaiting confirmation.`, 'order', { order: order._id });
+    void pushToStaff({ title: `New order #${orderNumber}`, body: `${user.name} · ₹${view.totals.grandTotal} · ${body.paymentMethod.toUpperCase()}`, data: { kind: 'staff_order', orderId: String(order._id), link: `/admin/orders/${order._id}` } });
     if (user.email) await sendMail(user.email, `Order #${orderNumber} placed`, `<p>Thanks for shopping with VSR! Your order <b>#${orderNumber}</b> for ₹${view.totals.grandTotal} has been received.</p>`);
     res.status(201).json({
       order,
@@ -463,8 +474,9 @@ c.post(
 c.get(
   '/notifications',
   ah(async (req, res) => {
-    const items = await Notification.find({ $or: [{ recipient: req.user!.id }, { audience: 'all_customers' }] }).sort({ createdAt: -1 }).limit(50);
-    res.json({ items: items.map((n) => ({ ...n.toObject(), read: n.readBy.some((u) => String(u) === req.user!.id) })) });
+    const items = await Notification.find(mine(req.user!.id)).sort({ createdAt: -1 }).limit(50);
+    // readBy / hiddenBy list other customers on broadcasts: never send them out
+    res.json({ items: items.map((n) => { const { readBy, hiddenBy: _h, ...rest } = n.toObject(); return { ...rest, read: readBy.some((u) => String(u) === req.user!.id) }; }) });
   }),
 );
 // "Notify Me" (back in stock): list / request / cancel. Only out-of-stock products can be requested.
@@ -483,8 +495,21 @@ c.delete('/stock-alerts/:productId', ah(async (req, res) => {
   await StockAlert.deleteOne({ customer: req.user!.id, product: req.params.productId, notifiedAt: null });
   res.json({ subscribed: false });
 }));
+// Swipe to delete one / "Clear all". Personal ones are deleted; broadcasts are only hidden for this customer.
+c.delete('/notifications/:id', ah(async (req, res) => {
+  const uid = req.user!.id;
+  await Notification.deleteOne({ _id: req.params.id, recipient: uid, audience: 'user' });
+  await Notification.updateOne({ _id: req.params.id, audience: 'all_customers' }, { $addToSet: { hiddenBy: uid } });
+  res.json({ ok: true });
+}));
+c.delete('/notifications', ah(async (req, res) => {
+  const uid = req.user!.id;
+  await Notification.deleteMany({ recipient: uid, audience: 'user' });
+  await Notification.updateMany({ audience: 'all_customers', hiddenBy: { $ne: uid } }, { $addToSet: { hiddenBy: uid } });
+  res.json({ ok: true });
+}));
 c.post('/notifications/read-all', ah(async (req, res) => {
-  await Notification.updateMany({ $or: [{ recipient: req.user!.id }, { audience: 'all_customers' }] }, { $addToSet: { readBy: req.user!.id } });
+  await Notification.updateMany(mine(req.user!.id), { $addToSet: { readBy: req.user!.id } });
   res.json({ ok: true });
 }));
 
@@ -508,6 +533,7 @@ c.post(
       isReturn: body.issueType === 'return_refund',
       messages: [{ from: 'customer', author: req.user!.id, text: body.description }],
     });
+    void pushToStaff({ title: `New support ticket ${ticket.ticketNumber}`, body: body.subject, data: { kind: 'staff_ticket', ticketId: String(ticket._id), link: '/admin/support' } });
     res.status(201).json({ ticket });
   }),
 );
@@ -742,7 +768,7 @@ c.delete(
 c.post(
   '/notifications/:id/read',
   ah(async (req, res) => {
-    await Notification.updateOne({ _id: req.params.id, $or: [{ recipient: req.user!.id }, { audience: 'all_customers' }] }, { $addToSet: { readBy: req.user!.id } });
+    await Notification.updateOne({ _id: req.params.id, ...mine(req.user!.id) }, { $addToSet: { readBy: req.user!.id } });
     res.json({ ok: true });
   }),
 );

@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <application
@@ -37,6 +38,11 @@
             android:value="2" />
         <!-- Work around main-thread freezes (ANR) on Adreno / Android 16 devices. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
+        <!-- Push notifications (FCM) shown while the app is closed: icon, colour and the
+             high-importance, lock-screen-visible channel created in lib/core/push.dart -->
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_notification" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_accent" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="vsr_alerts" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { History, Search, Sparkles, Tag } from 'lucide-react';
+import { ChevronRight, History, Search, Sparkles, Tag } from 'lucide-react';
 import { useShopAuth } from '../auth';
-import { couponLabel, useCategories, useCoupons, useDeals, useHome, useProducts, useRecentlyViewed, useRecentlyViewedIds, useRecommendations } from '../data';
-import { Btn, ButtonLink, cx, EmptyState, ErrorState, Page, PageTitle, ProductGrid, ProductImage, SectionHead, SelectBox, SkeletonGrid, View } from '../ui';
+import { couponLabel, type Category, useCategories, useCoupons, useDeals, useHome, useProducts, useRecentlyViewed, useRecentlyViewedIds, useRecommendations } from '../data';
+import { Btn, ButtonLink, cx, EmptyState, ErrorState, Page, PageTitle, ProductGrid, SectionHead, SelectBox, SkeletonGrid, SkeletonList, View } from '../ui';
 
 const SORTS: [string, string][] = [
   ['popular', 'Popularity'],
@@ -26,27 +26,82 @@ export function CategoriesPage() {
       </div>
       <View
         q={cats}
-        skeleton={<SkeletonGrid n={8} />}
+        skeleton={<SkeletonList n={6} />}
         empty={(list) => {
           const n = list.filter((c) => c.name.toLowerCase().includes(q) || c.children?.some((s) => s.name.toLowerCase().includes(q))).length;
           return n === 0 ? <EmptyState title="No categories found" message="Try a different word." /> : null;
         }}
       >
         {(list) => (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5">
+          // Tinted cards: name + short line, photo on the right, chips straight into each subcategory
+          <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4">
             {list
               .filter((c) => c.name.toLowerCase().includes(q) || c.children?.some((s) => s.name.toLowerCase().includes(q)))
               .map((c) => (
-                <Link key={c._id} to={`/category/${c._id}?name=${encodeURIComponent(c.name)}`} className="group rounded-2xl border border-line bg-surface p-2.5 transition-shadow hover:shadow-[0_8px_24px_-12px_rgb(11_61_46/0.25)]">
-                  <ProductImage src={c.image} alt="" className="aspect-[4/3] w-full rounded-xl transition-transform group-hover:scale-[1.02]" />
-                  <h2 className="mt-2.5 truncate px-0.5 text-[15px] font-bold">{c.name}</h2>
-                  {c.children?.length ? <p className="px-0.5 text-[13px] text-muted">{c.children.length} subcategories</p> : null}
-                </Link>
+                <CategoryCard key={c._id} c={c} index={list.indexOf(c)} q={q} />
               ))}
-          </div>
+          </ul>
         )}
       </View>
     </Page>
+  );
+}
+
+/** Soft card tints, rotated by position (blended over the surface token, so dark mode works too). */
+const CARD_HUES = ['#2e9d5b', '#e9a23b', '#e0566e', '#ef7b45', '#7b6fd6', '#3b8fd9'];
+
+function CategoryCard({ c, index, q }: { c: Category; index: number; q: string }) {
+  const href = (sub?: string) => `/category/${c._id}?name=${encodeURIComponent(c.name)}${sub ? `&sub=${sub}` : ''}`;
+  const kids = c.children ?? [];
+  const hue = CARD_HUES[index % CARD_HUES.length];
+  const subtitle = c.description?.trim()
+    ? c.description.trim()
+    : !kids.length
+      ? 'Browse all products'
+      : kids.length <= 2
+        ? kids.map((k) => k.name).join(' & ')
+        : `${kids.slice(0, 2).map((k) => k.name).join(', ')} & More`;
+  return (
+    <li className="group relative flex min-w-0 flex-col overflow-hidden rounded-[20px] p-2 sm:p-2.5" style={{ background: `color-mix(in oklab, ${hue} 12%, var(--color-surface))` }}>
+      {/* Whole card opens the category; the chips sit above this link */}
+      <Link to={href()} className="absolute inset-0 rounded-[20px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-700" aria-label={`${c.name}: ${subtitle}`} />
+      {/* Photo band: cropped to fill, so any photo looks tidy; text never sits on it */}
+      <span aria-hidden className="pointer-events-none relative block h-24 overflow-hidden rounded-2xl sm:h-32">
+        {c.image ? (
+          <img src={c.image} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.04]" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
+        ) : (
+          <span className="grid size-full place-items-center text-4xl font-extrabold text-ink" style={{ background: `color-mix(in oklab, ${hue} 20%, var(--color-surface))` }}>
+            {c.name.trim().charAt(0).toUpperCase()}
+          </span>
+        )}
+        <span className="absolute right-1.5 top-1.5 grid size-8 place-items-center rounded-full bg-surface text-ink shadow-sm">
+          <ChevronRight className="size-5 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </span>
+      <span className="pointer-events-none relative px-1 pb-1 pt-2.5">
+        <span className="line-clamp-2 text-[15.5px] font-extrabold leading-tight tracking-[-0.01em] text-ink sm:text-[17px]">{c.name}</span>
+        <span className="mt-0.5 block truncate text-[13px] text-muted">{subtitle}</span>
+      </span>
+      {kids.length ? (
+        <div className="relative mt-auto flex gap-1.5 overflow-x-auto pt-2 [scrollbar-width:none]" aria-label={`${c.name} subcategories`}>
+          {kids.map((k) => {
+            const hit = q !== '' && k.name.toLowerCase().includes(q);
+            return (
+              <Link
+                key={k._id}
+                to={href(k._id)}
+                className={cx(
+                  'inline-flex h-9 shrink-0 items-center rounded-full border px-3 text-[12.5px] font-semibold text-ink transition-colors focus-visible:outline-2 focus-visible:outline-brand-700',
+                  hit ? 'border-brand-700 bg-brand-100' : 'border-line bg-surface hover:border-brand-700',
+                )}
+              >
+                {k.name}
+              </Link>
+            );
+          })}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -55,7 +110,7 @@ export function ProductListPage() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const title = params.get('name') ?? params.get('title') ?? 'Products';
-  const [sub, setSub] = useState<string | undefined>();
+  const [sub, setSub] = useState<string | undefined>(params.get('sub') ?? undefined);
   const [sort, setSort] = useState(params.get('sort') ?? 'popular');
   const parent = useCategories().data?.find((c) => c._id === id);
   const q = useProducts({ category: sub ?? id ?? undefined, sort, type: params.get('type') ?? undefined });

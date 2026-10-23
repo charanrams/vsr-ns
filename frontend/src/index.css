@@ -46,12 +46,17 @@
 
 html {
   -webkit-font-smoothing: antialiased;
+  /* Phones: nothing may widen the page (sideways scroll / zoomed-out look); wide rows scroll inside themselves */
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   color: var(--color-ink);
   background: var(--color-cream);
 }
 body {
   background: var(--color-cream);
   min-height: 100dvh;
+  overflow-x: clip;
 }
 ::selection {
   background: var(--color-brand-100);
@@ -157,5 +162,12 @@ textarea {
 @media (max-width: 767px) {
   [data-sonner-toaster][data-y-position='bottom'] {
     bottom: calc(150px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* iOS Safari zooms the page when a focused field's text is under 16px; keep fields at 16px on phones */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
   }
 }

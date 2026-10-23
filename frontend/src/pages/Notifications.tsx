@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Send, Megaphone, Package, Info } from 'lucide-react';
+import { Send, Megaphone, Package, Info, BellRing } from 'lucide-react';
+import { usePushPrompt } from '../lib/push';
 import { api, errorMessage } from '../lib/api';
 import { dateTime, title } from '../lib/format';
 import { Button, Card, CardHeader, PageHeader, Field, Input, Textarea, Select, QueryState, Badge } from '../components/ui';
@@ -25,6 +26,7 @@ export default function Notifications() {
   return (
     <div className="animate-rise">
       <PageHeader crumbs={[{ label: 'Notifications' }]} title="Notifications" sub="Send in-app announcements and review transactional messages sent to customers." />
+      <StaffPushPrompt />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[380px_1fr]">
         <Card className="h-fit p-5">
           <h2 className="mb-4 font-bold">Create notification</h2>
@@ -66,5 +68,22 @@ export default function Notifications() {
         </Card>
       </div>
     </div>
+  );
+}
+
+/** Staff: browser push for new orders and support tickets. */
+function StaffPushPrompt() {
+  const { state, enable } = usePushPrompt();
+  if (state !== 'off' && state !== 'denied') return null;
+  return (
+    <Card className="mb-4 flex flex-wrap items-center gap-3 p-4">
+      <BellRing className="size-5 text-brand-700" aria-hidden />
+      <p className="min-w-0 flex-1 text-sm">
+        {state === 'denied'
+          ? 'Notifications are blocked for this site. Allow them in your browser settings to get new-order alerts.'
+          : 'Get a desktop alert for every new order and support ticket, even when this tab is in the background.'}
+      </p>
+      {state === 'off' ? <Button onClick={enable}>Turn on alerts</Button> : null}
+    </Card>
   );
 }

@@ -246,7 +246,7 @@ r.patch(
       await Payment.updateOne({ _id: refund.payment }, { status: 'refunded', $push: { logs: { event: 'Refund processed' } } });
       await Order.updateOne({ _id: refund.order }, { paymentStatus: 'refunded' });
       const order = await Order.findById(refund.order);
-      if (order) await notify(String(order.customer), 'Refund processed', `Your refund of ₹${refund.amount} for #${order.orderNumber} has been processed.`);
+      if (order) await notify(String(order.customer), 'Refund processed', `Your refund of ₹${refund.amount} for #${order.orderNumber} has been processed.`, 'order', { order: order._id });
     }
     await audit(req, `refund.${status}`, 'Refund', String(refund._id));
     res.json({ refund });

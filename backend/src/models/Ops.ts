@@ -93,10 +93,20 @@ const notificationSchema = new Schema(
     body: String,
     /** Optional in-app destination, e.g. /product/<id> for "Back in stock". */
     link: String,
+    /** Order this is about, so a tapped push opens it (each client maps it to its own route) */
+    order: { type: Schema.Types.ObjectId, ref: 'Order' },
     readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    /** Customers who swiped this away / cleared all (broadcasts are shared, so they're hidden per user) */
+    hiddenBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true },
 );
+// Every saved notification is also pushed to the recipient's phones/browsers (utils/push.ts).
+// insertMany (seed data) doesn't fire this, so seeding never pushes.
+notificationSchema.post('save', function (doc) {
+  if (process.env.NODE_ENV === 'test') return;
+  void import('../utils/push').then((m) => m.pushNotification(doc));
+});
 export const Notification = model('Notification', notificationSchema);
 
 const auditSchema = new Schema(

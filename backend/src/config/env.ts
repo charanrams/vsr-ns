@@ -32,6 +32,18 @@ const schema = z.object({
   MAINTENANCE_MESSAGE: z.string().default('We are upgrading VSR to serve you better. Please check back shortly.'),
   // Comma-separated serviceable PIN codes / prefixes; empty = everywhere
   SERVICE_PINCODES: z.string().default('5000'),
+  // Push notifications (Firebase Cloud Messaging). Local: path to the service-account JSON.
+  // Hosting: paste the JSON (or its base64) into FIREBASE_SERVICE_ACCOUNT_JSON instead.
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional().default(''),
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional().default(''),
+  // Browser push: the Firebase *web app* config + VAPID key. Served to the website by GET /store/config,
+  // so the frontend needs no Firebase settings of its own.
+  FIREBASE_WEB_API_KEY: z.string().optional().default(''),
+  FIREBASE_WEB_APP_ID: z.string().optional().default(''),
+  FIREBASE_AUTH_DOMAIN: z.string().optional().default(''),
+  FIREBASE_PROJECT_ID: z.string().optional().default(''),
+  FIREBASE_MESSAGING_SENDER_ID: z.string().optional().default(''),
+  FIREBASE_VAPID_KEY: z.string().optional().default(''),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -50,4 +62,5 @@ export const features = {
   razorpay: Boolean(env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET),
   cloudinary: Boolean(env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET),
   smtp: Boolean(env.SMTP_HOST),
+  webPush: Boolean(env.FIREBASE_WEB_API_KEY && env.FIREBASE_WEB_APP_ID && env.FIREBASE_PROJECT_ID && env.FIREBASE_MESSAGING_SENDER_ID && env.FIREBASE_VAPID_KEY),
 };

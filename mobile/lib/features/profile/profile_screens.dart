@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../core/api.dart';
 
 import '../../core/config.dart';
 import '../../core/format.dart';
@@ -186,36 +190,84 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
 }
 
 // ---------------------------------------------------------- Notifications ----
-class NotificationsScreen extends ConsumerWidget {
+/// Tap opens what the notification is about (order / product / details), swipe deletes it,
+/// "Mark all as read" and "Clear all" in the app bar.
+class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
+  // Swiped away: hidden at once, before the list refetches
+  final _removed = <String>{};
+
+  ApiClient get _api => ref.read(apiProvider);
+
+  Future<void> _run(Future<dynamic> Function() call, {String? done}) async {
+    try {
+      await call();
+      if (done != null && mounted) showMessage(context, done);
+    } catch (e) {
+      if (mounted) showMessage(context, errorText(e), error: true);
+    } finally {
+      ref.invalidate(notificationsProvider);
+    }
+  }
+
+  void _open(AppNotification x) {
+    if (!x.read) {
+      unawaited(_api.post('/store/me/notifications/${x.id}/read').then((_) => ref.invalidate(notificationsProvider), onError: (_) {}));
+    }
+    if (x.orderId != null) {
+      context.push('/orders/${x.orderId}');
+    } else if (x.link != null && x.link!.startsWith('/')) {
+      context.push(x.link!);
+    } else {
+      context.push('/notifications/${x.id}', extra: x);
+    }
+  }
+
+  Future<void> _clearAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Clear all notifications?'),
+        content: const Text("They'll be removed from this list. This can't be undone."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Clear all')),
+        ],
+      ),
+    );
+    if (ok ?? false) await _run(() => _api.delete('/store/me/notifications'), done: 'Notifications cleared');
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final n = ref.watch(notificationsProvider);
+    final items = (n.value ?? const <AppNotification>[]).where((x) => !_removed.contains(x.id)).toList();
+    final hasUnread = items.any((x) => !x.read);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
         actions: [
-          TextButton(
-            onPressed: () async {
-              try {
-                await ref
-                    .read(apiProvider)
-                    .post('/store/me/notifications/read-all');
-                ref.invalidate(notificationsProvider);
-              } catch (e) {
-                if (context.mounted) {
-                  showMessage(context, errorText(e), error: true);
-                }
-              }
-            },
-            child: const Text('Mark all read'),
+          IconButton(
+            tooltip: 'Mark all as read',
+            onPressed: hasUnread ? () => _run(() => _api.post('/store/me/notifications/read-all'), done: 'All marked as read') : null,
+            icon: const Icon(Icons.done_all_rounded),
+          ),
+          IconButton(
+            tooltip: 'Clear all',
+            onPressed: items.isEmpty ? null : _clearAll,
+            icon: const Icon(Icons.delete_sweep_outlined),
           ),
         ],
       ),
       body: AsyncBody(
         value: n,
         onRetry: () => ref.invalidate(notificationsProvider),
-        builder: (items) => items.isEmpty
+        builder: (_) => items.isEmpty
             ? const MessageView(
                 icon: Icons.notifications_none,
                 title: 'No notifications yet',
@@ -235,31 +287,42 @@ class NotificationsScreen extends ConsumerWidget {
                         ? Icons.local_offer_outlined
                         : Icons.info_outline;
                     final t = Theme.of(context).textTheme;
-                    return Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => context.push('/notifications/${x.id}', extra: x),
-                        child: Padding(
-                          padding: const EdgeInsets.all(VsrSpace.lg),
-                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            CircleAvatar(radius: 20, backgroundColor: context.vsr.brand50, child: Icon(icon, color: context.vsr.brandText, size: 20)),
-                            const SizedBox(width: VsrSpace.md),
-                            Expanded(
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Row(children: [
-                                  Expanded(child: Text(x.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleSmall?.copyWith(fontWeight: x.read ? FontWeight.w600 : FontWeight.w800))),
-                                  if (!x.read) ...[
-                                    const SizedBox(width: VsrSpace.sm),
-                                    Semantics(label: 'Unread', child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: VsrColors.accent, shape: BoxShape.circle))),
-                                  ],
+                    final error = Theme.of(context).colorScheme.error;
+                    return Dismissible(
+                      key: ValueKey(x.id),
+                      background: _SwipeDelete(alignment: Alignment.centerLeft, color: error),
+                      secondaryBackground: _SwipeDelete(alignment: Alignment.centerRight, color: error),
+                      onDismissed: (_) {
+                        setState(() => _removed.add(x.id));
+                        unawaited(_run(() => _api.delete('/store/me/notifications/${x.id}'), done: 'Notification deleted'));
+                      },
+                      child: Card(
+                        margin: EdgeInsets.zero,
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => _open(x),
+                          child: Padding(
+                            padding: const EdgeInsets.all(VsrSpace.lg),
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              CircleAvatar(radius: 20, backgroundColor: context.vsr.brand50, child: Icon(icon, color: context.vsr.brandText, size: 20)),
+                              const SizedBox(width: VsrSpace.md),
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Row(children: [
+                                    Expanded(child: Text(x.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.titleSmall?.copyWith(fontWeight: x.read ? FontWeight.w600 : FontWeight.w800))),
+                                    if (!x.read) ...[
+                                      const SizedBox(width: VsrSpace.sm),
+                                      Semantics(label: 'Unread', child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: VsrColors.accent, shape: BoxShape.circle))),
+                                    ],
+                                  ]),
+                                  const SizedBox(height: VsrSpace.xs),
+                                  Text(x.body, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodyMedium?.copyWith(color: context.vsr.muted)),
+                                  const SizedBox(height: VsrSpace.sm),
+                                  Text(ago(x.createdAt), style: t.bodySmall),
                                 ]),
-                                const SizedBox(height: VsrSpace.xs),
-                                Text(x.body, maxLines: 2, overflow: TextOverflow.ellipsis, style: t.bodyMedium?.copyWith(color: context.vsr.muted)),
-                                const SizedBox(height: VsrSpace.sm),
-                                Text(ago(x.createdAt), style: t.bodySmall),
-                              ]),
-                            ),
-                          ]),
+                              ),
+                            ]),
+                          ),
                         ),
                       ),
                     );
@@ -269,6 +332,23 @@ class NotificationsScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _SwipeDelete extends StatelessWidget {
+  const _SwipeDelete({required this.alignment, required this.color});
+  final Alignment alignment;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Container(
+        alignment: alignment,
+        padding: const EdgeInsets.symmetric(horizontal: VsrSpace.xl),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.delete_outline, color: Colors.white),
+          SizedBox(width: VsrSpace.sm),
+          Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        ]),
+      );
 }
 
 // ---------------------------------------------------------------- Support ----
@@ -487,7 +567,7 @@ class WishlistScreen extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(VsrSpace.gutter, VsrSpace.sm, VsrSpace.gutter, VsrSpace.xl),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 200,
-                mainAxisExtent: 344,
+                mainAxisExtent: 318,
                 crossAxisSpacing: VsrSpace.group,
                 mainAxisSpacing: VsrSpace.group,
               ),

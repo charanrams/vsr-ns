@@ -10,6 +10,7 @@ import { verifyWebhookSignature } from './utils/services';
 import { Payment, Order } from './models/Order';
 import authRoutes from './routes/auth';
 import storeRoutes from './routes/store';
+import deviceRoutes from './routes/devices';
 import adminOrders from './routes/admin/orders';
 import adminCatalog from './routes/admin/catalog';
 import adminPeople from './routes/admin/people';
@@ -60,6 +61,7 @@ export function createApp() {
   app.get('/api/v1/health', (_req, res) => res.json({ ok: true }));
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/store', storeRoutes);
+  app.use('/api/v1/devices', deviceRoutes);
 
   const admin = express.Router();
   admin.use(authenticate, requireStaff);

@@ -267,7 +267,8 @@ class _LoginEntryScreenState extends ConsumerState<LoginEntryScreen> {
       _error = null;
       _busy = true;
     });
-    final id = _id.text.trim();
+    // Phones go out as their last 10 digits, so autofilled prefixes (+91, +1 91…) don't matter
+    final id = _isPhone ? phoneDigits(_id.text) : _id.text.trim();
     try {
       // Registered → password (email) or OTP (phone). New → sign-up with the email/phone filled in.
       final r = await ref.read(apiProvider).post('/auth/check', {

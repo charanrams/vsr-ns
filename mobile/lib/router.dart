@@ -113,14 +113,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           }
           return _guestAllowed(loc) ? null : '/login';
         case SessionStatus.signedIn:
-          // Interactive login shows the success screen once; restored sessions go straight Home.
-          final welcome = session.welcome != null;
+          // Logged in → straight Home (no "Logged in successfully" stop; web does the same)
           if (_publicPaths.contains(loc) ||
               loc == '/splash' ||
-              loc == '/onboarding') {
-            return welcome ? '/auth/success' : '/';
+              loc == '/onboarding' ||
+              loc == '/auth/success') {
+            session.welcome = null; // plain reset: notifying here would re-trigger this redirect
+            return '/';
           }
-          if (loc == '/auth/success' && !welcome) return '/';
           return null;
       }
     },
@@ -249,6 +249,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, s) => ProductListScreen(
           title: s.uri.queryParameters['name'] ?? 'Products',
           categoryId: s.pathParameters['id'],
+          subId: s.uri.queryParameters['sub'],
         ),
       ),
       GoRoute(

@@ -18,7 +18,13 @@ import { cx } from '../ui';
 const INK = 'text-[#202923]';
 const SUB = 'text-[#4A524E]';
 const isEmail = (v: string) => /^\S+@\S+\.\S+$/.test(v.trim());
-const isPhone = (v: string) => /^(\+?91)?[6-9]\d{9}$/.test(v.replace(/[\s-]/g, ''));
+/** Last 10 digits of a typed/autofilled number (+91…, 0…, +1 91…); '' if fewer than 10. */
+const phoneDigits = (v: string) => {
+  const d = v.replace(/\D/g, '');
+  return d.length >= 10 ? d.slice(-10) : '';
+};
+/** Indian mobile number: only digits / + / spaces / dashes / brackets, judged on its last 10 digits. */
+const isPhone = (v: string) => /^[\d\s()+-]+$/.test(v.trim()) && v.replace(/\D/g, '').length <= 13 && /^[6-9]\d{9}$/.test(phoneDigits(v));
 const mask = (id: string) => {
   if (isEmail(id)) return id.trim();
   const d = id.replace(/\D/g, '').slice(-10);
@@ -224,7 +230,8 @@ export function LoginPage() {
     if (!valid) return setError('Enter a valid email or 10-digit mobile number');
     setError('');
     setBusy(true);
-    const v = id.trim();
+    // Phones go out as their last 10 digits, so autofilled prefixes (+91, +1 91…) don't matter
+    const v = phone ? phoneDigits(id) : id.trim();
     try {
       // Registered → password (email) or OTP (phone). New → sign-up with the email/phone filled in.
       const { data } = await shopApi.post('/auth/check', { identifier: v });

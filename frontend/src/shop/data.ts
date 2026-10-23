@@ -19,7 +19,7 @@ export interface LineItem {
   product: string; name: string; unit?: string; image?: string; unitPrice: number; mrp: number; quantity: number; lineTotal: number;
   available?: number; outOfStock?: boolean; previousPrice?: number; variant?: string; variantName?: string;
 }
-export interface Cart { items: LineItem[]; totals: Totals; warnings?: string[]; couponCode?: string }
+export interface Cart { items: LineItem[]; totals: Totals; warnings?: string[]; couponCode?: string; /** store rules: free delivery above this item total, else `fee` */ delivery?: { freeAbove: number; fee: number } }
 export interface Address {
   _id: string; label: string; recipient: string; phone: string; line1: string; line2?: string; landmark?: string; city: string; state: string;
   postalCode: string; isDefault?: boolean; lat?: number; lng?: number;
@@ -29,7 +29,7 @@ export interface Order {
   address?: Address; history?: { to: string; at: string; reason?: string }[]; deliveryCode?: string;
   deliveryPartner?: { name: string; phone?: string; avatar?: string; rating?: number }; rating?: number; rejectionReason?: string;
 }
-export interface Notice { _id: string; title: string; body?: string; kind: string; read?: boolean; createdAt: string; /** e.g. /product/<id> for back-in-stock */ link?: string }
+export interface Notice { _id: string; title: string; body?: string; kind: string; read?: boolean; createdAt: string; /** e.g. /product/<id> for back-in-stock */ link?: string; /** order it's about: tapping opens it */ order?: string }
 export interface Ticket { _id: string; ticketNumber: string; subject: string; status: string; createdAt: string }
 export interface Coupon { _id: string; code: string; type: 'percent' | 'flat' | 'free_delivery'; value: number; minOrder: number; endDate?: string; description?: string }
 export type HomeSectionKey = 'categories' | 'recommended' | 'deals' | 'bestSellers' | 'homemade' | 'recent' | 'category';

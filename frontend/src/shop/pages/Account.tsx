@@ -1,12 +1,13 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Bell, ChevronRight, FileText, Heart, HelpCircle, Info, LogOut, Mail, MapPin, Monitor, Moon, Phone, Plus, Receipt, Settings, Shield, Sun, Tag, Trash2, Truck, UserRound } from 'lucide-react';
+import { Bell, BellRing, CheckCheck, ChevronRight, FileText, Heart, HelpCircle, Info, LogOut, Mail, MapPin, Monitor, Moon, Phone, Plus, Receipt, Settings, Shield, Sun, Tag, Trash2, Truck, UserRound, X } from 'lucide-react';
 import { ago, dateTime, date as fmtDate } from '../../lib/format';
 import { errMsg, shopApi } from '../api';
 import { useShopAuth } from '../auth';
-import { couponLabel, useAddresses, useCoupons, useNotifications, useTickets, useWishlist } from '../data';
+import { usePushPrompt } from '../../lib/push';
+import { couponLabel, useAddresses, useCoupons, useNotifications, useTickets, useWishlist, type Notice } from '../data';
 import { useShopTheme, type ThemeMode } from '../ShopLayout';
 import { Btn, ButtonLink, cx, EmptyState, FormField, Page, PageTitle, Panel, ProductGrid, SelectBox, Sheet, SkeletonGrid, StatusPill, TextArea, TextInput, View } from '../ui';
 import { AddressCard } from './Checkout';
@@ -180,45 +181,190 @@ export function CouponsPage() {
 // ------------------------------------------------------------------ Notifications
 const kindIcon = (k: string) => (k === 'order' ? Truck : k === 'offer' ? Tag : Info);
 
+/** Where a notification leads: its order, its product, else the details page. */
+const noticeHref = (n: Notice) => (n.order ? `/account/orders/${n.order}` : n.link?.startsWith('/') ? n.link : `/account/notifications/${n._id}`);
+
 export function NotificationsPage() {
   const q = useNotifications();
   const qc = useQueryClient();
-  const readAll = async () => {
+  const navigate = useNavigate();
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [confirmClear, setConfirmClear] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['shop', 'notifications'] });
+  const run = async (call: () => Promise<unknown>, done?: string) => {
     try {
-      await shopApi.post('/store/me/notifications/read-all');
-      qc.invalidateQueries({ queryKey: ['shop', 'notifications'] });
+      await call();
+      if (done) toast.success(done);
     } catch (e) {
       toast.error(errMsg(e));
+    } finally {
+      refresh();
     }
   };
+  const remove = (id: string) => {
+    setRemoved((s) => new Set(s).add(id));
+    void run(() => shopApi.delete(`/store/me/notifications/${id}`), 'Notification deleted');
+  };
+  const open = (n: Notice) => {
+    if (!n.read) shopApi.post(`/store/me/notifications/${n._id}/read`).then(refresh, () => undefined);
+    navigate(noticeHref(n));
+  };
+  const list = (q.data ?? []).filter((n) => !removed.has(n._id));
   return (
     <Page narrow>
-      <PageTitle action={q.data?.some((n) => !n.read) ? <Btn tone="ghost" onClick={readAll}>Mark all read</Btn> : undefined}>Notifications</PageTitle>
-      <View q={q} empty={(l) => (l.length ? null : <EmptyState icon={<Bell className="size-8" />} title="No notifications yet" message="Order updates and offers will appear here." />)}>
-        {(l) => (
-          <ul className="space-y-2">
-            {l.map((n) => {
-              const Icon = kindIcon(n.kind);
-              return (
-                <li key={n._id}>
-                  <Link to={`/account/notifications/${n._id}`} className="flex gap-3 rounded-2xl border border-line bg-surface p-4 hover:border-brand-700/50">
-                    <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><Icon className="size-5" aria-hidden /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className={cx('flex-1 truncate', n.read ? 'font-semibold' : 'font-extrabold')}>{n.title}</span>
-                        {!n.read ? <span className="size-2 rounded-full bg-accent-500" aria-label="Unread" /> : null}
-                      </span>
-                      {n.body ? <span className="mt-0.5 line-clamp-2 text-sm text-muted">{n.body}</span> : null}
-                      <span className="mt-1.5 block text-xs text-muted">{ago(n.createdAt)}</span>
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+      <PageTitle
+        action={
+          list.length ? (
+            <span className="flex gap-1">
+              <Btn tone="ghost" disabled={!list.some((n) => !n.read)} onClick={() => run(() => shopApi.post('/store/me/notifications/read-all'), 'All marked as read')}>
+                <CheckCheck className="size-4" aria-hidden /> Mark all read
+              </Btn>
+              <Btn tone="ghost" onClick={() => setConfirmClear(true)}>
+                <Trash2 className="size-4" aria-hidden /> Clear all
+              </Btn>
+            </span>
+          ) : undefined
+        }
+      >
+        Notifications
+      </PageTitle>
+      <View q={q} empty={() => (list.length ? null : <EmptyState icon={<Bell className="size-8" />} title="No notifications yet" message="Order updates and offers will appear here." />)}>
+        {() => (
+          <>
+            <PushPrompt />
+            <p className="mb-3 text-xs text-muted md:hidden">Swipe a notification left or right to delete it.</p>
+            <ul className="space-y-2">
+              {list.map((n) => (
+                <SwipeRow key={n._id} onDelete={() => remove(n._id)}>
+                  <NoticeCard n={n} onOpen={() => open(n)} onDelete={() => remove(n._id)} />
+                </SwipeRow>
+              ))}
+            </ul>
+          </>
         )}
       </View>
+      <Sheet
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        title="Clear all notifications?"
+        footer={
+          <div className="flex gap-2">
+            <Btn tone="ghost" className="flex-1" onClick={() => setConfirmClear(false)}>Cancel</Btn>
+            <Btn
+              className="flex-1"
+              onClick={() => {
+                setConfirmClear(false);
+                setRemoved(new Set(list.map((n) => n._id)));
+                void run(() => shopApi.delete('/store/me/notifications'), 'Notifications cleared');
+              }}
+            >
+              Clear all
+            </Btn>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted">They'll be removed from this list. This can't be undone.</p>
+      </Sheet>
     </Page>
+  );
+}
+
+/** Offer browser push once per browser: shows only while permission hasn't been decided. */
+function PushPrompt() {
+  const { state, enable } = usePushPrompt();
+  if (state !== 'off') return null;
+  return (
+    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-line bg-surface p-4">
+      <BellRing className="size-5 shrink-0 text-brand-700" aria-hidden />
+      <p className="flex-1 text-sm">Get order updates and offers even when VSR isn't open.</p>
+      <Btn onClick={enable}>Turn on</Btn>
+    </div>
+  );
+}
+
+function NoticeCard({ n, onOpen, onDelete }: { n: Notice; onOpen: () => void; onDelete: () => void }) {
+  const Icon = kindIcon(n.kind);
+  return (
+    <div className="group relative flex rounded-2xl border border-line bg-surface hover:border-brand-700/50">
+      <button type="button" onClick={onOpen} className="flex min-w-0 flex-1 gap-3 rounded-2xl p-4 text-left">
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700"><Icon className="size-5" aria-hidden /></span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2 pr-8">
+            <span className={cx('flex-1 truncate', n.read ? 'font-semibold' : 'font-extrabold')}>{n.title}</span>
+            {!n.read ? <span className="size-2 rounded-full bg-accent-500" aria-label="Unread" /> : null}
+          </span>
+          {n.body ? <span className="mt-0.5 line-clamp-2 text-sm text-muted">{n.body}</span> : null}
+          <span className="mt-1.5 block text-xs text-muted">{ago(n.createdAt)}</span>
+        </span>
+      </button>
+      {/* Mouse / keyboard users: the delete button (phones swipe instead) */}
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Delete notification: ${n.title}`}
+        className="absolute right-2 top-2 grid size-9 place-items-center rounded-full text-muted opacity-0 hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 group-hover:opacity-100 max-md:hidden"
+      >
+        <X className="size-4" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/** Swipe left or right past ~35% of the width to delete; shorter swipes spring back. Taps still click. */
+function SwipeRow({ children, onDelete }: { children: ReactNode; onDelete: () => void }) {
+  const [dx, setDx] = useState(0);
+  const [leaving, setLeaving] = useState(0);
+  const start = useRef<{ x: number; y: number; w: number; horizontal: boolean | null } | null>(null);
+  const end = () => {
+    const s = start.current;
+    start.current = null;
+    if (!s) return;
+    if (Math.abs(dx) > s.w * 0.35) {
+      setLeaving(dx > 0 ? 1 : -1);
+      window.setTimeout(onDelete, 180);
+    } else setDx(0);
+  };
+  return (
+    <li
+      className="relative touch-pan-y overflow-hidden rounded-2xl"
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse') return;
+        start.current = { x: e.clientX, y: e.clientY, w: e.currentTarget.clientWidth, horizontal: null };
+      }}
+      onPointerMove={(e) => {
+        const s = start.current;
+        if (!s) return;
+        const mx = e.clientX - s.x;
+        const my = e.clientY - s.y;
+        if (s.horizontal === null && Math.hypot(mx, my) > 8) s.horizontal = Math.abs(mx) > Math.abs(my);
+        if (s.horizontal) setDx(mx);
+      }}
+      onPointerUp={end}
+      onPointerCancel={() => {
+        start.current = null;
+        setDx(0);
+      }}
+      onClickCapture={(e) => {
+        // A swipe isn't a tap
+        if (Math.abs(dx) > 8) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }}
+    >
+      <div aria-hidden className={cx('absolute inset-0 flex items-center rounded-2xl bg-red-600 px-5 text-sm font-bold text-white', dx < 0 || leaving < 0 ? 'justify-end' : 'justify-start')}>
+        <Trash2 className="mr-2 size-5" /> Delete
+      </div>
+      <div
+        className="relative"
+        style={{
+          transform: `translateX(${leaving ? `${leaving * 110}%` : `${dx}px`})`,
+          transition: start.current ? 'none' : 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        {children}
+      </div>
+    </li>
   );
 }
 

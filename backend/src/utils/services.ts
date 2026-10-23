@@ -79,6 +79,7 @@ export async function audit(req: Request, action: string, resourceType: string, 
   await AuditLog.create({ actor: req.user?.id, action, resourceType, resourceId, summary, requestId: req.id });
 }
 
-export async function notify(recipient: string | null, title: string, body: string, kind: 'order' | 'offer' | 'system' = 'order') {
-  await Notification.create({ recipient, audience: recipient ? 'user' : 'all_customers', title, body, kind });
+/** In-app notification + push to the recipient's devices (see the Notification save hook). */
+export async function notify(recipient: string | null, title: string, body: string, kind: 'order' | 'offer' | 'system' = 'order', extra: { order?: unknown; link?: string } = {}) {
+  await Notification.create({ recipient, audience: recipient ? 'user' : 'all_customers', title, body, kind, ...extra });
 }

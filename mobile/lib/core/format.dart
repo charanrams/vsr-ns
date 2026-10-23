@@ -17,4 +17,14 @@ String ago(DateTime? d) {
 }
 
 bool isEmail(String s) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(s.trim());
-bool isPhone(String s) => RegExp(r'^(\+?91)?[6-9]\d{9}$').hasMatch(s.replaceAll(RegExp(r'[\s-]'), ''));
+/// Last 10 digits of a typed/autofilled number (+91…, 0…, +1 91…); '' if fewer than 10.
+String phoneDigits(String s) {
+  final d = s.replaceAll(RegExp(r'\D'), '');
+  return d.length >= 10 ? d.substring(d.length - 10) : '';
+}
+
+/// Indian mobile number: only digits / + / spaces / dashes / brackets, judged on its last 10 digits.
+bool isPhone(String s) =>
+    RegExp(r'^[\d\s()+-]+$').hasMatch(s.trim()) &&
+    s.replaceAll(RegExp(r'\D'), '').length <= 13 &&
+    RegExp(r'^[6-9]\d{9}$').hasMatch(phoneDigits(s));

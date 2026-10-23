@@ -35,7 +35,7 @@ async function transition(req: Request, orderId: string, to: OrderState, reason?
   order.status = to;
   await order.save();
   await audit(req, `order.${to}`, 'Order', String(order._id), `${order.orderNumber}: ${from} → ${to}${reason ? ` (${reason})` : ''}`);
-  if (STATUS_COPY[to]) await notify(String(order.customer), `Order #${order.orderNumber}`, STATUS_COPY[to]! + (reason && to !== 'cancelled' ? ` Reason: ${reason}` : ''));
+  if (STATUS_COPY[to]) await notify(String(order.customer), `Order #${order.orderNumber}`, STATUS_COPY[to]! + (reason && to !== 'cancelled' ? ` Reason: ${reason}` : ''), 'order', { order: order._id });
   return order;
 }
 

@@ -1,4 +1,4 @@
-package `in`.vsr.vsr_customer
+package com.vsr
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -365,7 +365,7 @@ class _MapPickScreenState extends ConsumerState<MapPickScreen> {
             },
           ),
           children: [
-            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'in.vsr.vsr_customer'),
+            TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.vsr'),
             const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors')]),
           ],
         ),

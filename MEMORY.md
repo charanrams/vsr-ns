@@ -1,83 +1,460 @@
-# Project Memory
+# VSR Nature Market — Comprehensive System Architecture & Memory
 
-## 1. Project Snapshot
-- Product: VSR multi-category marketplace (spec: `docs/prd.md`; visual refs: `docs/admin_screens/`, `docs/customer_mobile_app_screens/`)
-- backend/: Node 22 + Express 4 + TypeScript + Mongoose 8, zod validation, npm, `tsx` dev
-- frontend/: ONE app, two areas: customer storefront + public/marketing pages at `/` (src/shop/*, own session `vsr.shop.session`, own axios `shopApi`, customer login portal) and staff admin under `/admin/*` (old admin URLs redirect). React 18 + TS + Vite 6 + Tailwind 4.1 (`@tailwindcss/vite`), TanStack Query, Recharts, lucide-react, sonner. Admin/staff only.
-- mobile/: Flutter 3.47, Riverpod 3, go_router 18, http, flutter_secure_storage, razorpay_flutter. Customers only.
-- Auth: JWT access (15m) + opaque rotating refresh tokens (sha256 stored in `Session`)
-- No git repo yet.
+> **Single Source of Truth** for the entire VSR platform codebase:
+> - **Backend**: Node 22 + Express 4 + TypeScript + Mongoose 8 + Socket.IO + FCM + Razorpay + Cloudinary
+> - **Frontend Web**: React 18 + Vite 6 + Tailwind 4.1 + TanStack Query (Storefront at `/` + Staff Admin at `/admin/*`)
+> - **Mobile Customer App**: Flutter 3.47 + Riverpod 3 + GoRouter 18 + Razorpay + OSM/flutter_map
 
-## 2. Architecture
-- API base `/api/v1`: `/auth`, `/store` (public catalogue) + `/store/me/*` (customer), `/admin/*` (staff, `authenticate + requireStaff + can(perm)`), `/webhooks/payments` (raw body).
-- Roles/permissions single source: `backend/src/utils/roles.ts`; mirrored in `frontend/src/lib/access.ts` (NAV + `homeFor(roles)` landing pages).
-- Login `portal: 'admin'|'customer'` → server rejects wrong audience.
-- Order state machine + stock reserve/release/fulfil (Mongo transactions): `backend/src/utils/orders.ts`. Admin transitions: `routes/admin/orders.ts`.
-- Dev DB: empty `MONGO_URI` → mongodb-memory-server replset (transactions need a replset), auto-seeded by `src/seed.ts`.
-- Frontend: shared UI kit `src/components/ui.tsx`, charts `components/charts.tsx`, shell `components/AdminLayout.tsx`, one file per page in `src/pages/`.
-- Mobile: `lib/core` (api, models, theme, format), `lib/state/providers.dart` (session, cart, data providers), `lib/widgets/common.dart`, `lib/features/*`, `lib/router.dart` (StatefulShellRoute bottom nav).
+---
 
-- Realtime sync (2026-10-23): `backend/src/realtime.ts` = one Mongo change stream (needs replset; Atlas/dev memory replset OK) → Socket.IO `change {coll, op, id}` (no data) to rooms `public` / `user:<id>` / `customers` / `staff`; clients refetch via REST. Web: `frontend/src/lib/realtime.ts` (collection → TanStack query-key prefixes, started in main.tsx; Vite proxies `/socket.io` with ws). Mobile: `lib/state/realtime.dart` (collection → providers, watched in main.dart). New screens/queries must be added to those two maps. Spec: `docs/realtime-sync.md`.
+## 1. Project Directory & Architecture Map
 
-- Home screen is admin-controlled (Admin → Marketing → Home Screen, `/admin/home-screen`, perm marketing): `backend/src/utils/homeLayout.ts` (HomeLayout singleton: sections order/title/enabled/autoFill/pinned productIds + categoryIds incl. subcategories). `/store/home` returns `sections` + `recommended`; `/me/recommendations` = pinned first, then past-order matches. Web + mobile Home render rows from `sections`. Category rows (key 'category' + categoryId, products inline as `items`) come from the Categories form switch "Show on Home screen" (`setCategoryHomeRow`): top-level category → listed in Shop by Category (`categoryIds`; empty = all top-level, switches default on); subcategory → own product row after Best Sellers and also editable in the Home Screen editor; same layout doc.
-- Mobile location: GPS off → in-app system dialog via `location` package `requestService()` (no Settings trip); only permanently-denied permission still needs app Settings (Android rule).
+```
+vsr/
+├── backend/
+│   ├── src/
+│   │   ├── config/             # CORS policy, environment variables, feature flags
+│   │   ├── middleware/         # Auth (JWT verification, role guards, request IDs)
+│   │   ├── models/             # Mongoose schemas (User, Catalog, Order, Ops)
+│   │   ├── routes/             # REST API routes (auth, store, devices, admin/*)
+│   │   ├── utils/              # Order state machine, realtime change stream, FCM, restock
+│   │   ├── app.ts              # Express application factory & middleware setup
+│   │   ├── server.ts           # HTTP server, Socket.IO binding, port listener (5050)
+│   │   ├── seed.ts             # Comprehensive database seed script
+│   │   └── realtime.ts         # Mongo change stream to Socket.IO room broadcaster
+├── frontend/
+│   ├── src/
+│   │   ├── components/         # AdminLayout, Admin UI kit, charts, widgets
+│   │   ├── lib/                # Admin auth, API client, access matrix, permissions
+│   │   ├── pages/              # Staff Admin pages (20 dedicated modules)
+│   │   ├── shop/               # Customer Storefront (Layout, Auth, APIs, 9 modules)
+│   │   ├── App.tsx             # Root router with dual storefront and admin sub-apps
+│   │   └── index.css           # Tailwind 4.1 CSS tokens, custom scrollbars, global styles
+├── mobile/
+│   ├── lib/
+│   │   ├── core/               # Theme tokens (VsrPalette, VsrSpace, VsrRadius), models, API, legal
+│   │   ├── state/              # Riverpod providers (cart, session, gate, realtime, push)
+│   │   ├── widgets/            # ProductTile, ProductRail, BottomCta, QuantityStepper, etc.
+│   │   ├── features/           # 9 domain modules (system, onboarding, auth, location,
+│   │   │                       #   catalog, discovery, checkout, orders, profile)
+│   │   ├── router.dart         # GoRouter shell route, bottom nav, auth guards, pop scopes
+│   │   └── main.dart           # Flutter entry point, system overlays, gate init
+└── docs/                       # PRD, screen references, realtime sync documentation
+```
 
-- Notify Me (back in stock): `backend/src/utils/restock.ts` (StockAlert model, one open request per customer+product; `checkRestock` runs from the realtime change stream on every products write → in-app Notification with `link: /product/<id>` + email, each alert claimed atomically so it fires once). Customer API `GET/POST/DELETE /store/me/stock-alerts[/:productId]` (POST only when out of stock). Web `NotifyMe` (shop/ui.tsx), app `NotifyMeButton` (widgets/common.dart) on cards + product page. Product cards show real ratings only ("New" when none).
+---
 
-## 3. Design System
-- Tokens per PRD §5.1: forest green `#0B3D2E/#064E3B`, orange accent `#F58220`, cream bg `#FBF7EE`, ink `#202923`, line `#EBE5DA`. Web tokens in `frontend/src/index.css` @theme; Flutter tokens in `mobile/lib/core/theme.dart` (with dark theme).
-- Mobile layout system (2026-10-23 refinement pass): `VsrSpace` 4-pt scale + roles (gutter 16, sectionTop 28/sectionBottom 12, group 12, row 8, navClearance 120) and `VsrRadius` (sm 10, md 14, lg 18) in `core/theme.dart`; start-aligned app bar titles; grouped lists use `TileGroup` + `NavTile` (`widgets/common.dart`), never hand-built Card+Divider stacks; `MessageView` is safe inside lists (scrolls only when height is bounded). Per-screen checklist: `docs/mobile-screen-checklist.md`.
-- Font (web): Plus Jakarta Sans. Logo assets: `frontend/public/logo.jpg`, `logo-mark.png`; mobile `assets/images/`. App icons installed from root `AppIcons.zip`.
+## 2. Backend Architecture & Data Layer
 
-## 4. Engineering Decisions
-- Mobile theming: `themeModeProvider` (System default; Light/Dark picker in Profile → More, saved in SharedPreferences `vsr.themeMode`), EXCEPT splash, onboarding and the whole login/sign-up flow, which are wrapped with `alwaysLight()` in `router.dart`. Adaptive colours come from the `VsrPalette` ThemeExtension via `context.vsr.<token>` (bg, surface, line, lineSoft, ink, muted, brandText, brand50/100, accent50, status fg/bg). `VsrColors` = fixed brand colours (filled buttons/badges with white text). New UI in app screens must use `context.vsr`, not `VsrColors.cream/ink/muted/...`. Date: 2026-10-22
-- Stock is reserved at **admin accept**, not at order placement (PRD §7.3). Date: 2026-10-21
-- Product deletion = archive (keeps order snapshots). Category delete blocked if products/subcats exist.
-- Delivery OTP plain value stored `select:false` and only returned to the owning customer; admin verifies it (no delivery-partner app yet).
-- Dev-only `devOtp` in auth responses when `NODE_ENV!=production`.
+### 2.1 Core Infrastructure & Server Entry
+- **Server Entry (`server.ts` & `app.ts`)**:
+  - Express 4 server running on port `5050` (`NODE_ENV=development`).
+  - Security & performance: `helmet()`, `cors(corsOptions)`, `compression()`, `morgan()`.
+  - CORS policy in `config/cors.ts`: Allows `localhost`, specific web origins, wildcard subdomains, and no-origin mobile clients.
+  - Raw body webhook route: `/api/v1/webhooks/payments` processes Razorpay signatures and captured/failed payment events before `express.json()` parsing.
+- **Realtime Layer (`realtime.ts`)**:
+  - Subscribes to MongoDB change streams (`User`, `Category`, `Product`, `Order`, `Review`, `Notification`, `Coupon`, `Banner`, `Kitchen`, `HomeLayout`, etc.).
+  - Emits lightweight `{ coll, op, id }` events via Socket.IO to specific rooms:
+    - `public`: Catalog updates, banners, categories, home layout.
+    - `user:<id>`: Order status changes, personal notifications, address/profile updates.
+    - `customers`: Broadcast notifications, new deals.
+    - `staff`: Order management alerts, inventory alerts, support tickets.
+- **Push Notification Engine (`utils/push.ts`)**:
+  - FCM v1 integration with `firebase-admin`.
+  - `DeviceToken` collection maintains guest & user FCM device tokens.
+  - Automatic push delivery triggered via Mongoose post-save hooks on `Notification`.
+  - Android notification channel `vsr_alerts` configured with high importance and lockscreen visibility.
 
-## 5. Completed Major Work (2026-10-21)
-- Integrations live in backend/.env: MongoDB Atlas (db `vsr`, auto-seeded when empty), Cloudinary (`charan12`), Razorpay test keys. Verified upload + Razorpay order creation.
-- Admin shell: hamburger collapses sidebar on desktop (persisted in localStorage `vsr.sidebar`), content goes full width; sidebar promo card removed; scrollbars hidden globally (index.css).
-- Categories accordion: single-open, animated (grid-rows), scrolls opened section into view; closed panels are inert.
-- Backend complete: auth (email+password, phone/email OTP, signup verify, reset), catalogue, cart, checkout, orders, payments/refunds, inventory, customers, delivery partners, kitchens, banners/coupons, notifications, support, reports, dashboard, audit, staff users, seeds.
-- Admin portal: all sidebar pages matching reference screens; role redirect after login.
-- Customer app: onboarding → auth → home/categories/search/product → cart/coupon → address → payment (COD/Razorpay) → success → orders/tracking/delivery code/cancel/reorder/rate → profile/notifications/help/wishlist/offers/more.
+### 2.2 Mongoose Schemas & Data Models
+1. **User Model (`models/User.ts`)**:
+   - `User`: Email, phone, passwordHash, name, avatar, roles (`customer`, `super_admin`, `admin`, `inventory_manager`, `order_manager`, `kitchen_staff`, `delivery_staff`, `marketing_lead`, `support_agent`), addresses (subdoc array with geo coordinates, default flag, receiver info), status (`active`, `blocked`).
+   - `Session`: Refresh token hash, user reference, expiresAt, userAgent, ipAddress.
+2. **Catalog Model (`models/Catalog.ts`)**:
+   - `Category`: Name, slug, image, parent category reference, displayOrder, isActive, showOnHome.
+   - `Product`: Name, slug, category, subcategory, brand, description, images (array), tags, status (`active`, `draft`, `archived`), badge (`bestseller`, `new`, `organic`, `fresh`), nutrition/ingredients, ratingAverage, ratingCount, stock, reservedStock, minOrderQty, maxOrderQty, hasVariants, variants (subdocs with name, sku, price, mrp, stock, reservedStock, isDefault).
+   - `Review`: Product ID, customer ID, order ID, rating (1-5), comment, images, status (`pending`, `approved`, `rejected`).
+3. **Order & Payment Models (`models/Order.ts`)**:
+   - `Order`: OrderNumber (`VSR-YYYYMMDD-XXXX`), customer ID, items (product snapshot, variant ID, variantName, quantity, price, mrp, subtotal), deliveryAddress snapshot, billSummary (itemsTotal, discountTotal, deliveryFee, taxes, grandTotal), status (`placed`, `confirmed`, `picking`, `packed`, `assigned`, `out_for_delivery`, `delivered`, `cancelled`), cancelReason, deliveryPartner ID, deliveryOtp (stored select:false), paymentStatus (`pending`, `paid`, `failed`, `refunded`), paymentMethod (`cod`, `razorpay`, `wallet`), timeline array.
+   - `Payment`: Order ID, amount, provider (`razorpay`, `cod`), providerOrderId, providerPaymentId, status, logs.
+   - `Cart`: Customer ID, items (product ID, variant ID, quantity), appliedCoupon, updatedAt.
+   - `Refund`: Order ID, payment ID, amount, reason, status (`processed`, `failed`), providerRefundId.
+4. **Operations Models (`models/Ops.ts`)**:
+   - `Notification`: Recipient (or `all_customers` / `all_staff`), title, message, type, link, order ID, readBy, hiddenBy.
+   - `StockAlert`: Product ID, customer ID, notified, notifiedAt (atomic claim restock trigger).
+   - `Coupon`: Code, title, discountType (`percent`, `flat`), discountValue, minOrderValue, maxDiscount, validFrom, validUntil, usageLimit, usageCount, isActive.
+   - `Banner`: Title, subtitle, image, linkType (`category`, `product`, `url`), linkValue, displayOrder, isActive.
+   - `Kitchen`: Name, chefName, phone, specialty, address, bannerImage, rating, status (`active`, `inactive`).
+   - `SupportTicket`: Customer ID, order ID, subject, category, message, status (`open`, `in_progress`, `resolved`), responses.
+   - `DeliveryPartner`: Name, phone, vehicleType, vehicleNumber, status (`active`, `on_delivery`, `inactive`), currentCoordinates.
+   - `HomeLayout`: Pinned product IDs, section orders, category rows configuration.
+   - `AuditLog`: Staff user ID, action, resource, resourceId, details, ipAddress.
 
-- Charts are all backend-driven with range params: dashboard `trendRange/statusRange/catRange/bestRange/earnRange` (`seriesFor`: daily ≤31 days, monthly beyond), inventory overview `months` (month-end stock rebuilt from InventoryMovement ledger), customers insights `months`, payments/support `trendDays`, reports `range`. UI uses `RangeSelect` (components/ui.tsx).
+### 2.3 API Endpoints Breakdown
 
-- Mobile spec (customer app, 210 screens) being added section by section, additive only. Done: 1.1 launch/gates (`state/app_gate.dart`, `features/system/`), login per user's reference images (`features/auth/login_flow.dart`: entry → password/OTP → success; reset OTP dialog → new password; keep-me-logged-in = memory-only tokens), splash/onboarding (assets cropped from user refs, auto-scroll 4s), 1.3 location (`features/location/`: geolocator + platform geocoder + flutter_map OSM, serviceability via `/store/serviceability`, SERVICE_PINCODES env), 1.4 discovery (`features/discovery/`: search v2 w/ recent/suggestions/filter/sort, deals, campaign, recommended `/store/me/recommendations`, recently viewed local, notification detail). Spec 1.2 was replaced by the user's own login references. Skipped by design: items marked "if supported/enabled" (barcode search, live map, notify-me).
+#### Public & Customer Store APIs (`/api/v1/store`)
+| Endpoint | Method | Description |
+|---|---|---|
+| `/config` | `GET` | Platform settings, razorpay key, version gates, maintenance status |
+| `/serviceability` | `GET` | Check pincode serviceability against `SERVICE_PINCODES` |
+| `/home` | `GET` | Complete home layout (banners, sections, categories, recommendations) |
+| `/categories` | `GET` | Category tree (parents and children) |
+| `/products` | `GET` | Filtered product catalog (search, category, price, tags, pagination) |
+| `/products/:id` | `GET` | Single product details, variant breakdown, stock availability |
+| `/products/:id/reviews` | `GET` | Approved reviews, rating distribution |
+| `/deals` | `GET` | Flash sales, discount offers, campaign banners |
+| `/search/suggestions` | `GET` | Auto-complete suggestions for product search |
+| `/me/cart` | `GET/POST/PUT`| Fetch active cart, add/update quantity, sync cart |
+| `/me/cart/coupon` | `POST/DELETE`| Apply coupon code, remove coupon code |
+| `/me/wishlist` | `GET/POST/DEL`| Customer wishlist items, toggle products |
+| `/me/addresses` | `GET/POST/PUT/DEL`| Customer delivery address book |
+| `/me/orders` | `GET/POST` | Order history, initiate new order checkout |
+| `/me/orders/:id` | `GET/POST` | Detailed order timeline, cancel order request |
+| `/me/orders/:id/invoice`| `GET` | Download/render printable PDF invoice data |
+| `/me/products/:id/review`|`POST/PUT` | Submit or update review for a delivered product |
+| `/me/stock-alerts` | `GET/POST/DEL`| Subscribe or unsubscribe to back-in-stock alerts |
+| `/me/notifications` | `GET/PUT/DEL` | In-app notification center, mark read, delete/clear |
+| `/me/tickets` | `GET/POST` | Customer support ticket submission and history |
 
-- Pack sizes (variants) are first-class: variant subdocs carry price/mrp/stock/reserved; cart/order lines carry `variant` + `variantName`; products with sizes ALWAYS sell from variant stock (default/first size when none chosen); reserve/release/fulfil per size inside the Mongo transaction (`utils/orders.ts`, `variantFor`, `lineKey`). Admin product PUT preserves variant `_id`/`reserved` by SKU and blocks removing a size with reservations. Admin order details read stock by `product:variant`. Known gap: admin Inventory page still shows product-level stock for sized products (variant stock is edited in the product form).
-- 1.5 done: product extras (`features/catalog/product_extras.dart`: gallery/zoom, reviews screen, write/edit review via `/store/me/products/:id/review` gated on a delivered order, success screen, unavailable view), size picker, wishlist snackbars.
+#### Staff Admin APIs (`/api/v1/admin`)
+| Endpoint | Method | Required Permission | Description |
+|---|---|---|---|
+| `/orders` | `GET` | `orders` | Filtered order management list |
+| `/orders/:id` | `GET` | `orders` | Full order lifecycle details and audit trail |
+| `/orders/:id/transition` | `POST` | `orders` | State transition (`accept`, `pack`, `dispatch`, `deliver`) |
+| `/orders/:id/assign` | `POST` | `orders` | Assign order to delivery partner |
+| `/orders/:id/verify-otp` | `POST` | `orders` | Verify customer OTP to complete delivery |
+| `/catalog/products` | `GET/POST/PUT/DEL` | `products` | Product management and variant stock editor |
+| `/catalog/categories` | `GET/POST/PUT/DEL` | `categories` | Category hierarchy, banner imagery, home row switch |
+| `/catalog/reviews` | `GET/PUT` | `products` | Review moderation (approve / reject) |
+| `/people/customers` | `GET/PUT` | `customers` | Customer directory, block/unblock, address inspection |
+| `/people/delivery-partners` | `GET/POST/PUT` | `delivery` | Onboard delivery personnel, track status |
+| `/people/users` | `GET/POST/PUT` | `users` | Staff administration and RBAC assignment |
+| `/business/inventory` | `GET/POST` | `inventory` | Stock adjustments, low stock alerts, audit movement ledger |
+| `/business/coupons` | `GET/POST/PUT/DEL` | `marketing` | Promo codes, minimum orders, usage caps |
+| `/business/banners` | `GET/POST/PUT/DEL` | `marketing` | Promotional hero banners and campaign graphics |
+| `/business/home-screen` | `GET/PUT` | `marketing` | Visual drag-and-drop home screen section customizer |
+| `/business/payments` | `GET` | `payments` | Transactions ledger, Razorpay reconciliations, refund trigger |
+| `/business/reports` | `GET` | `reports` | Revenue, order frequency, cohort, top selling analytics |
+| `/business/support` | `GET/PUT` | `support` | Ticket resolution, customer response threads |
+| `/business/settings` | `GET/PUT` | `settings` | Store timings, free delivery threshold, tax rates |
 
-## 6. Current Work
-- Nothing in progress. Verified: backend `tsc` clean + E2E order lifecycle via curl; frontend `tsc -b` + `vite build` clean, all pages screenshot-checked; `flutter analyze` clean, `flutter test` green. Mobile not yet run on a device/emulator.
+---
 
-## 7. Known Issues
-- A few seeded Unsplash image IDs don't match the product (UI falls back to a placeholder).
-- Location permission / map-pin screens from the mobile reference are not implemented (no maps provider chosen — PRD §21 open decision).
-- Delivery partner mobile app not built (out of the requested scope).
+## 3. Frontend Web Application Breakdown
 
-## 8. Important Constraints
-- Config: website reads the backend address only from `frontend/src/lib/config.ts` (`API_BASE`/`API_ORIGIN` ← `VITE_API_URL` in `frontend/.env`; empty = same-origin via Vite proxy, whose target/port also come from .env). Backend CORS policy lives in `backend/src/config/cors.ts` (CORS_ORIGINS list + `*.domain` wildcards, any localhost in dev, no-Origin clients allowed, 403 `cors_rejected` otherwise); Socket.IO uses the same `isAllowedOrigin`. Add production website domains to CORS_ORIGINS.
-- Dev API runs on port 5050 (5000 is used by another local app). Mobile default API_URL is http://localhost:5050/api/v1; Android needs `adb reverse tcp:5050 tcp:5050` via `mobile/tool/adb_reverse.ps1` (or `tool/dev.ps1` = reverse + flutter run). Re-run after reconnecting a device.
-- Roles: ONE web login at `/login` (`/admin/login` redirects). It signs in without a portal hint and routes by role in `shop/auth.tsx` `accept()`: staff → admin session (`vsr.session`) + `homeFor(roles)`; customers → shop session; delivery partners refused (no web portal). Sessions stay separate per area. Account pages guarded by `RequireCustomer`.
-- Legal/policy text single source: `frontend/src/shop/legal.ts` → mobile `lib/core/legal.dart` generated by `mobile/tool/gen_legal.mts` (rerun after edits). Registered name/address/GSTIN still blank in LEGAL_ENTITY; needs legal review before launch.
-- Secrets only in backend `.env`; never in clients.
+The web application runs from a single unified Vite/React build (`frontend/src/App.tsx`). It smartly segments into two distinct user experiences:
+1. **Customer Storefront** (Root routes `/` using `ShopLayout` and `shopApi` session `vsr.shop.session`).
+2. **Staff Admin Portal** (Protected routes `/admin/*` using `AdminLayout` and staff session `vsr.session`).
 
-- Mobile shell (`router.dart` `_Shell`): back on a non-Home tab goes to Home (PopScope); scrolling down hides the nav bar and shows the compact cart bar in its place. Signed-in launch asks location + notification permission once per run via in-app dialogs only (`state/permissions.dart`, permission_handler). `LoadingView` is a pulsing skeleton (used by `AsyncBody`).
+### 3.1 Storefront Modules & Pages (`src/shop/pages/*`)
+1. **Home (`Home.tsx` - `/`)**:
+   - Hero banner carousel with call-to-actions.
+   - Pinned category circular rail with quick filters.
+   - Dynamic sections managed by Admin Home Screen Builder:
+     - "Best Sellers" rail with `ProductCard` components.
+     - "Deals of the Day" with discount chips.
+     - Category-specific showcase rows (e.g., Organic Honey, Cold Pressed Oils).
+     - "From Local Kitchens" homemade specials.
+   - Trust badges (100% Organic, Express Delivery, Secure Payments).
+2. **Search & Discovery (`Search.tsx` - `/search`)**:
+   - Debounced instant search query input.
+   - Multi-facet filters: Category, Price Range, In-Stock only, Organic badge.
+   - Sort dropdown: Relevance, Price (Low to High / High to Low), Customer Rating, Newest.
+   - Empty state with recommendations when no results match.
+3. **Catalog & Collections (`Catalog.tsx`)**:
+   - `/categories`: Visual grid of all top-level departments and subcategories.
+   - `/category/:id`: Category landing page with subcategory filter pills.
+   - `/deals`: Aggregated discounted items and active promotional campaigns.
+   - `/campaign/:index`: Specific marketing campaign landing with curated products.
+   - `/recommended`: Personalized recommendations derived from past orders.
+   - `/recently-viewed`: Client-side persisted recently viewed product grid.
+4. **Product Details (`Product.tsx` - `/product/:id`)**:
+   - High-resolution gallery carousel with thumbnail navigation and full-screen lightbox zoom.
+   - Dynamic variant pack-size selector (e.g., 250g, 500g, 1kg) updating price, MRP, and stock status.
+   - Delivery pin code serviceability validator.
+   - Real-time stock status (In Stock, Low Stock, or Out of Stock with "Notify Me" trigger).
+   - Rich product highlights, nutritional information, origin, storage instructions.
+   - Customer ratings breakdown, review list, and "Write a Review" modal gated on verified purchase.
+5. **Checkout & Cart (`Checkout.tsx`)**:
+   - `/cart`: Slide-over drawer and dedicated page with quantity steppers, item removal, free delivery progress bar.
+   - `/checkout`: Address selection/creation, contact information, delivery slot selection.
+   - `/checkout/payment`: Payment method choice (Razorpay checkout modal for UPI/Cards/Netbanking or Cash on Delivery).
+   - `/order-placed/:id`: Order confirmation page with confetti, order summary, timeline link, and invoice download.
+6. **Customer Account & Orders (`Orders.tsx` & `Account.tsx`)**:
+   - `/account`: Customer dashboard displaying profile stats, wallet balance, active orders.
+   - `/account/orders`: Filterable order history (Active, Completed, Cancelled).
+   - `/account/orders/:id`: Step-by-step progress tracker, delivery partner contact, items breakdown, cancel button, and invoice viewer.
+   - `/account/orders/:id/rate`: Dedicated feedback flow for completed orders.
+   - `/account/addresses`: Delivery address book CRUD with map coordinate picker.
+   - `/account/wishlist`: Saved products list with one-click "Move to Cart".
+   - `/account/coupons`: Available coupons list with minimum spend criteria and direct "Apply" action.
+   - `/account/notifications`: In-app notification center with read/unread indicators and swipe-to-delete.
+   - `/account/help`: FAQ accordion and customer support ticket submission.
+7. **Customer Auth Flow (`Auth.tsx`)**:
+   - Dedicated minimal, distraction-free authentication container (`LoginPage`, `PasswordPage`, `OtpPage`, `SignUpPage`, `ForgotPasswordPage`, `NewPasswordPage`, `PasswordUpdatedPage`).
+   - Seamless role routing: If an administrative staff member signs in at `/login`, they are immediately redirected to `/admin/dashboard`.
+8. **Legal & Information (`Info.tsx`)**:
+   - Dynamic policy pages (`/about`, `/contact`, `/faq`, `/terms`, `/privacy`, `/refund-policy`, `/delivery-policy`).
 
-## 11. Do Not Repeat
-- permission_handler is pinned to 12.0.1: 13.x pulls permission_handler_android 14.x (compileSdk 37), which fails to build here ("Failed to find target android-37").
-- Don't play the splash with `video_player`: its texture deadlocked the UI thread with Impeller/Vulkan on an iQOO I2501 (ANR "Input dispatching timed out"). Splash is an animated WebP (`assets/images/splash.webp`, 540×960, 20 fps, 6 s) shown via `Image`, with spinner + Gemini ✦ removed via ffmpeg `delogo`. Regenerate from the source MP4 with the same delogo boxes if the clip changes.
-- Don't read `state` inside a Riverpod `Notifier.build()` (directly or via a method it calls) — defer with `Future.microtask` (GateNotifier bug caused a blank screen).
-- Don't `ref.invalidate` a provider that watches the notifier doing the invalidating (logout bug).
-- Tailwind 4.0.0 vite plugin crashes on build ("Cannot convert undefined or null to object") → use 4.1.x.
-- `useEffect(() => window.scrollTo(...))` crashes in new Chrome (scrollTo returns a Promise) → wrap in braces.
-- A `SliverPersistentHeaderDelegate` child must fill `maxExtent` (give it `height: maxExtent`); otherwise layout throws every frame → blank Home + ANR on device (fixed in Home `_PinnedSearch`, 2026-10-23).
-- Guests: Orders/Profile/More tabs are open to guests (router `_guestAllowed`) and show `GuestPrompt` / `requireLogin` instead of redirecting to /login; never `context.pop()` without `canPop()` on screens reachable by redirect.
-- Git Bash mangles `/paths` passed to node scripts → use `MSYS_NO_PATHCONV=1`.
+### 3.2 Staff Admin Modules (`src/pages/*`)
+1. **Dashboard (`Dashboard.tsx` - `/admin/dashboard`)**:
+   - Realtime metric cards: Today's Revenue, Active Orders, Out of Stock Items, Pending Tickets.
+   - Interactive charts with date-range filters (`seriesFor` daily/monthly): Revenue Trends, Order Status distribution, Top Selling Categories.
+2. **Orders (`Orders.tsx` & `OrderDetails.tsx` - `/admin/orders`)**:
+   - Real-time tabular order feed with status chips, payment indicators, delivery partner badges.
+   - Detail view with order items, variant specifications, stock deduction logs.
+   - Step-by-step state transition triggers: Accept Order -> Mark Picking -> Mark Packed -> Dispatch -> Verify Delivery OTP.
+3. **Products & Catalog (`Products.tsx` & `ProductForm.tsx` - `/admin/products`)**:
+   - Product catalog with search, category filtering, stock health badges.
+   - Complete product editor: Name, slug, descriptions, multi-image upload via Cloudinary, tags, pack-size variant table with SKU, price, MRP, and inventory counts.
+   - `/admin/products/reviews`: Customer review moderation queue (Approve / Reject).
+4. **Categories (`Categories.tsx` - `/admin/categories`)**:
+   - Interactive category accordion.
+   - Direct switch: "Show on Home Screen" which automatically creates/links a curated row on the storefront home page.
+5. **Inventory (`Inventory.tsx` & `InventoryHistory.tsx` - `/admin/inventory`)**:
+   - Real-time stock counts across standard and variant products.
+   - Quick stock adjustment dialog with reason logging (restock, breakage, correction).
+   - Immutable audit trail of every inventory movement.
+6. **Customer Management (`Customers.tsx` - `/admin/customers`)**:
+   - Customer directory with lifetime spend, order count, join date.
+   - Deep inspection drawer: past orders, saved addresses, active tickets, block/unblock account toggle.
+7. **Delivery Operations (`DeliveryPartners.tsx` & `DeliveryOperations.tsx`)**:
+   - Partner registration, phone number, vehicle details, active/inactive toggle.
+   - Active delivery map and assignment panel for out-for-delivery orders.
+8. **Homemade Kitchens (`Homemade.tsx` - `/admin/homemade`)**:
+   - Local chef and kitchen directory, approval workflow, specialty cuisine configuration.
+9. **Visual Home Screen Builder (`HomeScreen.tsx` - `/admin/home-screen`)**:
+   - Drag-and-drop reordering of home screen rows.
+   - Enable/disable sections (Banners, Best Sellers, Category rows, Custom Rails).
+   - Product pin selector allowing staff to pin specific hero products to any section.
+10. **Marketing (`Marketing.tsx` - `/admin/marketing`)**:
+    - Promotional coupon creation (percentage or flat discount, expiry, usage limits).
+    - Hero banner manager with image upload and link target configuration.
+11. **Payments & Reconciliations (`Payments.tsx` - `/admin/payments`)**:
+    - Payment transaction ledger, Razorpay settlement status, manual refund initiation.
+12. **Analytics & Reports (`Reports.tsx` - `/admin/reports`)**:
+    - Exportable CSV/Excel reports: Sales reports, customer acquisition, inventory turnover, delivery partner performance.
+13. **Customer Support (`Support.tsx` - `/admin/support`)**:
+    - Support ticket inbox, priority tags, internal notes, reply thread with customer.
+14. **System Notifications (`Notifications.tsx` - `/admin/notifications`)**:
+    - Push broadcast composer: Send targeted or store-wide push alerts to customer devices.
+15. **Store Settings (`Settings.tsx` - `/admin/settings`)**:
+    - Store operational hours, serviceability pin codes, minimum order value, free delivery threshold, tax configuration.
 
-## 12. Last Updated
-2026-10-23
+---
+
+## 4. Mobile Customer App (Flutter) Breakdown
+
+### 4.1 Architecture & Navigation Structure
+- **Router (`lib/router.dart`)**:
+  - `GoRouter` with `StatefulShellRoute.indexedStack` managing the 4-tab bottom navigation:
+    1. Index 0: **Categories** (`/categories`)
+    2. Index 1: **Home** (`/`) - Root tab
+    3. Index 2: **Orders** (`/orders`)
+    4. Index 3: **Profile** (`/profile`)
+  - **Dynamic Shell (`_Shell`)**:
+    - Back button on non-home tabs automatically routes back to Home (`canPop: currentIndex == 1`).
+    - Smart scroll detection: Scrolling downward hides the bottom navigation bar and displays the compact `FloatingCartBar` in its place.
+    - Floating Cart Bar (`FloatingCartBar`) with active item count and subtotal, with tap-to-expand.
+  - **System App Gates (`state/app_gate.dart`)**:
+    - Prioritized gate interceptor handling Maintenance Mode, Force Update (minVersion check), Unsupported Version, and Service Outage before allowing user into the app.
+
+### 4.2 Comprehensive Mobile Screen Inventory
+
+#### 1. System & Lifecycle Screens (`features/system/system_screens.dart`)
+- **`SplashScreen`**: Plays animated WebP brand logo (`assets/images/splash.webp`) without Impeller Vulkan texture deadlock. Pre-loads session and gate status.
+- **`AppLoadingScreen`**: Pulsing skeleton state during initial authorization bootstrap.
+- **`MaintenanceScreen`**: Full-screen lockout during server maintenance with custom administrative message.
+- **`UpdateRequiredScreen`**: Mandatory blocking update screen redirecting user to App Store / Play Store.
+- **`UnsupportedVersionScreen`**: Graceful deprecation screen for legacy operating systems.
+- **`ServiceUnavailableScreen`**: Network offline and server reachability failure retry view.
+
+#### 2. Onboarding Flow (`features/onboarding/onboarding_screens.dart`)
+- **`OnboardingScreen`**: 3-step carousel highlighting Organic Products, Lightning Delivery, and Artisanal Kitchens. Features 4-second auto-advancing timer, animated dot indicators, "Skip", and "Get Started" triggers.
+
+#### 3. Authentication & Security Flow (`features/auth/login_flow.dart`)
+- **`LoginEntryScreen`**: Entry point accepting mobile number or email address with country code prefix, legal consent checkbox, and guest bypass link.
+- **`PasswordScreen`**: Secure password input with visibility toggle, forgot password trigger, and OTP alternative switch.
+- **`LoginOtpScreen`**: 6-box auto-focusing numeric OTP verification with resend timer and SMS autofill support.
+- **`CreatePasswordScreen`**: New password definition with strength meters for account setup or recovery.
+- **`PasswordUpdatedScreen`**: Success confirmation before returning to login or dashboard.
+- **`SignUpScreen`**: User registration collecting Full Name, Email, Phone Number, and Referral Code.
+- **`LoginSuccessScreen`**: Seamless animated transition into the customer dashboard.
+
+#### 4. Location & Delivery Serviceability (`features/location/location_screens.dart`)
+- **`ChooseLocationScreen`**: Saved addresses selector with GPS "Use Current Location" button.
+- **`LocationPermissionScreen`**: Educational primer explaining why location permission is necessary.
+- **`LocationSearchScreen`**: Places autocomplete search bar powered by OpenStreetMap Nominatim.
+- **`MapPickScreen`**: Interactive map pin-drop screen using `flutter_map` with draggable marker, reverse geocoding, and address confirmation.
+- **`NotServiceableScreen`**: Informative prompt shown when customer's pin code is outside delivery zones.
+- **`LocationUnavailableScreen` / `LocationDeniedScreen`**: Directs user to device settings or system dialogs.
+
+#### 5. Catalog & Product Discovery (`features/catalog/` & `features/discovery/`)
+- **`HomeScreen` (`catalog_screens.dart`)**:
+  - Hero Header with active delivery address picker and notification bell.
+  - Pinned search bar with instant filter triggers.
+  - Admin promotional banner carousel (`_BannerCarousel`).
+  - Circular category rail (`_CategoryCell`).
+  - Curated product rails (`ProductRail`): "Best Sellers", "Deals of the Day", "Local Kitchens".
+- **`CategoriesScreen` (`catalog_screens.dart`)**:
+  - Full department visual browser with high-res category imagery, item count badges, and subcategory navigation.
+- **`ProductListScreen` (`catalog_screens.dart`)**:
+  - Paginated product grid or list view with sorting sheet (Price, Rating, Newest) and subcategory filters.
+- **`ProductDetailScreen` (`catalog_screens.dart`)**:
+  - Multi-image zoomable carousel with full-screen `GalleryScreen`.
+  - Pack-size variant selector with real-time price, discount percentages, and stock availability.
+  - "Notify Me" button (`NotifyMeButton`) for out-of-stock items.
+  - Product specs: Highlights, Nutritional Facts, Storage, Origin.
+  - Customer review summary with direct navigation to `ReviewsScreen` and `WriteReviewScreen`.
+  - Sticky bottom action bar with `AddToCartButton` and direct checkout.
+- **`SearchV2Screen` (`discovery_screens.dart`)**:
+  - Live debounced search with recent search history chips and clear button.
+  - Category, price range, and in-stock bottom sheet filters (`_FilterSheet`).
+- **`DealsScreen` (`discovery_screens.dart`)**:
+  - Flash discount cards, coupon banners, and limited-time offer badges.
+- **`ProductCollectionScreen` (`discovery_screens.dart`)**:
+  - Dedicated grid view for "Recommended For You" or "Recently Viewed" items.
+
+#### 6. Cart & Checkout Flow (`features/checkout/checkout_screens.dart`)
+- **`CartScreen`**:
+  - `_FreeDeliveryBar`: Visual progress indicator calculating remaining amount to qualify for free shipping.
+  - Cart item cards (`_CartItemCard`) featuring dynamic unit calculation (`_cartItemUnit` dynamically displays "7 pcs · In stock").
+  - `_CouponCard` and bottom sheet coupon selector (`_CouponSheet`) with instant discount validation.
+  - `BillCard`: Subtotal, delivery fee, coupon savings, and grand total.
+  - `BottomCta`: 48px full-width standardized checkout button.
+- **`AddressesScreen` & `AddressFormScreen`**:
+  - Manage saved delivery addresses (Home, Work, Other) with default address selector.
+  - Complete form with street, apartment, landmark, pin code, contact name, and phone.
+- **`PaymentScreen`**:
+  - Payment method choices: Online Payment (UPI, Credit/Debit Cards, Netbanking via Razorpay Flutter SDK) or Cash on Delivery (COD).
+  - Price summary and delivery address preview before final placement.
+- **`OrderSuccessScreen`**:
+  - Celebration confirmation with order number, estimated delivery window, "Track Order" button, and "Continue Shopping".
+
+#### 7. Orders & Tracking (`features/orders/order_screens.dart`)
+- **`OrdersScreen`**:
+  - Segmented tabs: Active Orders, Past Orders, Cancelled Orders.
+  - Order summary cards with thumbnail previews, status chip, total amount, and quick reorder button.
+- **`OrderDetailScreen`**:
+  - Visual order timeline (`_Stop`): Placed -> Confirmed -> Picking -> Packed -> Out for Delivery -> Delivered.
+  - Delivery OTP display card (for the customer to provide to the delivery partner).
+  - Delivery partner card with direct call button.
+  - Items ordered list featuring **individual item "Buy again" buttons** (`_buyItemAgain`) alongside "Rate item" reviews.
+  - Cancellation sheet (`_CancelSheet`) allowing order cancellation prior to dispatch.
+  - Native PDF invoice generation and download via `invoice.dart`.
+- **`RateOrderScreen`**:
+  - Overall delivery and food rating with multi-star picker, quality tag pills, and review comment field.
+
+#### 8. Profile & Customer Support (`features/profile/profile_screens.dart`)
+- **`ProfileScreen`**:
+  - User header with avatar, name, phone, email, and "Edit Profile" shortcut.
+  - Quick stat counters: Saved Addresses, Wishlist count, Active Orders.
+  - Menu list: Orders, Addresses, Wishlist, Notifications, Offers, Help & Support, Settings, Sign Out.
+- **`EditProfileScreen`**:
+  - Update full name, email address, phone number, and profile picture.
+- **`WishlistScreen`**:
+  - Saved favorites grid with quick "Add to Cart" and delete swipe.
+- **`OffersScreen`**:
+  - Catalog of active discount codes with one-tap copy and expiry details.
+- **`NotificationsScreen`**:
+  - Real-time customer notification feed with unread indicators, deep links to orders/products, and swipe-to-delete.
+- **`HelpScreen`**:
+  - Customer support ticket creation sheet (`_TicketSheet`), support phone/email shortcuts, and interactive FAQ list.
+- **`MoreScreen`**:
+  - App theme toggle (System / Light / Dark via `themeModeProvider`), cache clearing, version number, legal policy links.
+- **`LegalScreen` & Info Screens (`legal_screens.dart`)**:
+  - In-app markdown view for Privacy Policy, Terms of Service, Refund Policy, Shipping Policy, and About Us.
+
+---
+
+## 5. Reusable Design System & Component Library
+
+### 5.1 Color Tokens & Theming (`mobile/lib/core/theme.dart`)
+- **Palette Principles**:
+  - Brand Primary: Forest Green (`#0B3D2E` / `#064E3B`).
+  - Accent Highlight: Sunburst Orange (`#F58220`).
+  - Natural Cream Background: `#FBF7EE`.
+  - Deep Ink Typography: `#202923`.
+  - Border Lines: `#EBE5DA`.
+- **Adaptive Architecture (`VsrPalette`)**:
+  - Built using Flutter `ThemeExtension<VsrPalette>` accessible via `context.vsr.<token>`:
+    - `bg`, `surface`, `line`, `lineSoft`, `ink`, `muted`, `brandText`, `brand50`, `brand100`, `accent50`, `statusFg`, `statusBg`.
+  - Eliminates hardcoded colors, ensuring instant and seamless Light / Dark mode responsiveness.
+- **Spacing & Radius Constants**:
+  - `VsrSpace`: 4-pt grid system (`gutter: 16`, `sectionTop: 28`, `sectionBottom: 12`, `group: 12`, `row: 8`, `navClearance: 120`).
+  - `VsrRadius`: `sm: 10`, `md: 14`, `lg: 18`.
+
+### 5.2 Standardized UI Widgets (`mobile/lib/widgets/common.dart`)
+- **`ProductTile`**:
+  - Standardized product card engineered to prevent flex overflow bugs.
+  - Fixed-ratio product image container with "Out of stock" overlay badge.
+  - Compact title, pack-size subtitle, and rating stars.
+  - Price & MRP using wrapped flex layout (`Wrap`) to accommodate varied currency lengths without clipping.
+  - Integrated `AddToCartButton` with loading animations and dynamic quantity stepper.
+- **`ProductRail`**:
+  - Horizontal scrolling list of `ProductTile` cards bounded to a standardized 314pt height.
+- **`BottomCta`**:
+  - Standard bottom action bar with `double.infinity` full-width alignment, 48pt height touch targets, and safe area insets.
+- **`QtyStepper`**:
+  - Compact plus/minus stepper widget for cart and card interactions.
+- **`NotifyMeButton`**:
+  - Back-in-stock subscription button with animated state feedback.
+- **`TileGroup` & `NavTile`**:
+  - Unified iOS/Material grouped list tiles for settings and profile navigation.
+- **`PriceTag` & `BillRow`**:
+  - Formatted currency rendering with strikethrough MRP and discount badges.
+- **`AsyncBody` & `LoadingView`**:
+  - Shimmering skeleton loaders with error states and pull-to-refresh integration.
+
+---
+
+## 6. Recent UI Bug Fixes & Refinement History
+
+1. **ProductTile Overflow Elimination (`mobile/lib/widgets/common.dart`)**:
+   - Fixed: Bottom flex overflow of 3.9px and right overflow of 6.3px.
+   - Solution: Relocated "Out of stock" chip onto the media stack, changed price and MRP row to `Wrap`, tightened padding to 10px, and standardized internal SizedBox spacing.
+2. **ProductRail & Home Header Height Tightening**:
+   - Fixed: Excessive vertical dead space between sections on the home screen.
+   - Solution: Tightened `ProductRail` height to 314pt and reduced `_HomeHeader` minimum body height from 166pt to 150pt.
+3. **Dynamic Piece Calculation in Cart (`mobile/lib/features/checkout/checkout_screens.dart`)**:
+   - Fixed: Static unit text ("1 pc") remained unchanged when item quantities were increased.
+   - Solution: Updated `_cartItemUnit(it)` to multiply the unit count by the active line item quantity (e.g., dynamically displaying "7 pcs · In stock").
+4. **Individual Item "Buy Again" in Orders (`mobile/lib/features/orders/order_screens.dart`)**:
+   - Fixed: Customers could only reorder the entire order, without the ability to buy an individual product again.
+   - Solution: Added `_buyItemAgain` button on every order line item inside `OrderDetailScreen`, allowing single-item reorders directly to cart.
+5. **Standardized Bottom CTA Layout (`mobile/lib/widgets/common.dart`)**:
+   - Fixed: Cart and checkout action buttons appeared centered or truncated on wide displays.
+   - Solution: Standardized `BottomCta` to stretch across the full available width with a 48px height touch target.
+6. **Code Analysis & Health**:
+   - Full workspace verified with `dart analyze mobile/lib` returning **0 errors and 0 warnings**.
+
+---
+
+## 7. Operational Guidelines & Commands
+
+- **Backend Development**:
+  ```bash
+  cd backend
+  npm run dev          # Starts TypeScript server on http://localhost:5050
+  ```
+- **Frontend Development**:
+  ```bash
+  cd frontend
+  npm run dev          # Starts Vite dev server (Storefront + Admin)
+  ```
+- **Mobile Development & Device Sync**:
+  ```bash
+  cd mobile
+  # If running on Android device via USB:
+  adb reverse tcp:5050 tcp:5050
+  flutter run
+  ```
+- **Type Checking & Linting**:
+  ```bash
+  # Backend
+  cd backend && npx tsc --noEmit
+  # Frontend
+  cd frontend && npm run build
+  # Mobile
+  cd mobile && dart analyze lib
+  ```

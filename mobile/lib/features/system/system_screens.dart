@@ -9,7 +9,7 @@ import '../../widgets/common.dart';
 import '../../widgets/status_screen.dart';
 
 // Store listing used by update prompts. Replace with the published app IDs at release.
-const _androidStore = 'https://play.google.com/store/apps/details?id=in.vsr.vsr_customer';
+const _androidStore = 'https://play.google.com/store/apps/details?id=com.vsr';
 const _iosStore = 'https://apps.apple.com/in/search?term=VSR';
 Future<void> openStore() => safeLaunch(Platform.isIOS ? _iosStore : _androidStore, external: true);
 

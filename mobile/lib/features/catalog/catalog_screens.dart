@@ -213,8 +213,8 @@ class _HomeHeader extends SliverPersistentHeaderDelegate {
   final Color bg;
   final VoidCallback onLocation, onBell, onSearch;
 
-  static const minBody = 166.0;
-  static const maxBody = 166.0;
+  static const minBody = 150.0;
+  static const maxBody = 150.0;
   // The illustration is always light, so header text uses fixed dark ink in both themes
   static const _ink = VsrColors.ink;
   static const _sub = Color(0xFF4A524E);
@@ -728,81 +728,181 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
                     title: 'No categories found',
                   );
                 }
-                return GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(
-                    VsrSpace.gutter,
-                    VsrSpace.xs,
-                    VsrSpace.gutter,
-                    VsrSpace.navClearance,
-                  ),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 200,
-                    mainAxisExtent: 172,
-                    crossAxisSpacing: VsrSpace.group,
-                    mainAxisSpacing: VsrSpace.group,
-                  ),
-                  itemCount: items.length,
-                  itemBuilder: (_, i) {
-                    final Category c = items[i];
-                    return Card(
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => context.push(
-                          '/category/${c.id}?name=${Uri.encodeComponent(c.name)}',
+                // 2 columns on phones, more on tablets; fixed card height keeps rows even
+                return LayoutBuilder(builder: (context, box) {
+                  final cols = box.maxWidth >= 900 ? 4 : box.maxWidth >= 600 ? 3 : 2;
+                  final scale = MediaQuery.textScalerOf(context).scale(1);
+                  return GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(VsrSpace.gutter, 0, VsrSpace.gutter, VsrSpace.navClearance),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: cols,
+                      crossAxisSpacing: VsrSpace.md,
+                      mainAxisSpacing: VsrSpace.md,
+                      mainAxisExtent: 232 + 56 * (scale - 1).clamp(0, 1.5),
+                    ),
+                    itemCount: items.length,
+                    // Tint by position in the full list so a card keeps its colour while searching
+                    itemBuilder: (_, i) => _CategoryCard(category: items[i], index: list.indexOf(items[i]), query: _q),
+                  );
+                });
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Soft card tints, rotated by position so neighbours differ. Blended over the surface, so the
+/// same hues work in light and dark mode.
+const _cardHues = [
+  Color(0xFF2E9D5B), // green
+  Color(0xFFE9A23B), // amber
+  Color(0xFFE0566E), // rose
+  Color(0xFFEF7B45), // peach
+  Color(0xFF7B6FD6), // lavender
+  Color(0xFF3B8FD9), // sky
+];
+
+/// One category as a tinted card: photo band on top (cropped to fill, so any photo works),
+/// then name + one line, then chips straight into each subcategory. Text never sits on the photo.
+class _CategoryCard extends StatelessWidget {
+  const _CategoryCard({required this.category, required this.index, required this.query});
+  final Category category;
+  final int index;
+  final String query;
+
+  void _open(BuildContext context, [String? sub]) => context.push(
+        '/category/${category.id}?name=${Uri.encodeComponent(category.name)}${sub == null ? '' : '&sub=$sub'}',
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final c = category;
+    final v = context.vsr;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final hue = _cardHues[index % _cardHues.length];
+    final tint = Color.alphaBlend(hue.withValues(alpha: dark ? 0.16 : 0.12), v.surface);
+    final kids = c.children;
+    final subtitle = (c.description?.trim().isNotEmpty ?? false)
+        ? c.description!.trim()
+        : kids.isEmpty
+            ? 'Browse all products'
+            : kids.length <= 2
+                ? kids.map((k) => k.name).join(' & ')
+                : '${kids.take(2).map((k) => k.name).join(', ')} & More';
+    final hasImage = c.image != null && c.image!.isNotEmpty;
+    const pad = VsrSpace.sm;
+
+    return Material(
+      color: tint,
+      borderRadius: BorderRadius.circular(VsrRadius.lg),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _open(context),
+        child: Padding(
+          padding: const EdgeInsets.all(pad),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Photo band
+            SizedBox(
+              height: 96,
+              child: Stack(fit: StackFit.expand, children: [
+                ExcludeSemantics(
+                  child: hasImage
+                      ? NetImage(c.image, radius: VsrRadius.md, fit: BoxFit.cover)
+                      : Container(
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: hue.withValues(alpha: dark ? 0.24 : 0.18),
+                            borderRadius: BorderRadius.circular(VsrRadius.md),
+                          ),
+                          child: Text(
+                            c.name.trim().isEmpty ? '?' : c.name.trim()[0].toUpperCase(),
+                            style: TextStyle(fontSize: 40, fontWeight: FontWeight.w800, color: v.ink),
+                          ),
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(VsrSpace.sm + 2),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: NetImage(
-                                  c.image,
-                                  width: double.infinity,
-                                  radius: VsrRadius.sm,
-                                ),
-                              ),
-                              const SizedBox(height: VsrSpace.sm + 2),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: VsrSpace.xxs,
-                                ),
+                ),
+                Positioned(
+                  right: VsrSpace.xs,
+                  top: VsrSpace.xs,
+                  child: ExcludeSemantics(
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: v.surface,
+                        shape: BoxShape.circle,
+                        boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 6, offset: Offset(0, 1))],
+                      ),
+                      child: Icon(Icons.chevron_right_rounded, size: 20, color: v.ink),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            // Name + one line: takes the space left, ends in "…" instead of overflowing
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(VsrSpace.xxs, VsrSpace.sm, VsrSpace.xxs, 0),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    c.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 15.5, height: 1.2, fontWeight: FontWeight.w800, letterSpacing: -0.2, color: v.ink),
+                  ),
+                  const SizedBox(height: VsrSpace.xxs),
+                  Flexible(
+                    child: Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, height: 1.3, color: v.muted),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+            if (kids.isNotEmpty)
+              SizedBox(
+                height: 34,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: kids.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: VsrSpace.xs),
+                  itemBuilder: (_, i) {
+                    final k = kids[i];
+                    final hit = query.isNotEmpty && k.name.toLowerCase().contains(query);
+                    return Semantics(
+                      button: true,
+                      label: '${c.name}: ${k.name}',
+                      child: Material(
+                        color: hit ? v.brand100 : v.surface,
+                        shape: StadiumBorder(side: BorderSide(color: hit ? v.brandText : v.line)),
+                        child: InkWell(
+                          customBorder: const StadiumBorder(),
+                          onTap: () => _open(context, k.id),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: VsrSpace.md),
+                            child: Center(
+                              child: ExcludeSemantics(
                                 child: Text(
-                                  c.name,
+                                  k.name,
                                   maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 15,
-                                  ),
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: v.ink),
                                 ),
                               ),
-                              if (c.children.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.fromLTRB(
-                                    VsrSpace.xxs,
-                                    VsrSpace.xxs,
-                                    VsrSpace.xxs,
-                                    0,
-                                  ),
-                                  child: Text(
-                                    '${c.children.length} subcategories',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall,
-                                  ),
-                                ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
                     );
                   },
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+          ]),
+        ),
       ),
     );
   }
@@ -814,17 +914,18 @@ class ProductListScreen extends ConsumerStatefulWidget {
     super.key,
     required this.title,
     this.categoryId,
+    this.subId,
     this.sort,
     this.type,
   });
   final String title;
-  final String? categoryId, sort, type;
+  final String? categoryId, subId, sort, type;
   @override
   ConsumerState<ProductListScreen> createState() => _ProductListScreenState();
 }
 
 class _ProductListScreenState extends ConsumerState<ProductListScreen> {
-  String? _sub;
+  late String? _sub = widget.subId;
   late String? _sort = widget.sort;
 
   @override
@@ -1054,6 +1155,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
+              duration: const Duration(seconds: 2),
               content: Text('${p.name} added to cart'),
               action: SnackBarAction(
                 label: 'VIEW CART',
@@ -1090,6 +1192,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             SnackBar(
+              duration: const Duration(seconds: 2),
               content: Row(
                 children: [
                   Icon(

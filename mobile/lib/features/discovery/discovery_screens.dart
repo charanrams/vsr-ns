@@ -22,7 +22,7 @@ class ProductGrid extends StatelessWidget {
         padding: padding,
         shrinkWrap: shrinkWrap,
         physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 210, mainAxisExtent: 344, crossAxisSpacing: VsrSpace.group, mainAxisSpacing: VsrSpace.group),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 210, mainAxisExtent: 318, crossAxisSpacing: VsrSpace.group, mainAxisSpacing: VsrSpace.group),
         itemCount: products.length,
         itemBuilder: (_, i) => ProductTile(product: products[i], width: double.infinity),
       );
@@ -495,7 +495,7 @@ class CampaignScreen extends ConsumerWidget {
               : SliverPadding(
                   padding: const EdgeInsets.fromLTRB(VsrSpace.gutter, 0, VsrSpace.gutter, VsrSpace.xl),
                   sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 210, mainAxisExtent: 344, crossAxisSpacing: VsrSpace.group, mainAxisSpacing: VsrSpace.group),
+                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 210, mainAxisExtent: 318, crossAxisSpacing: VsrSpace.group, mainAxisSpacing: VsrSpace.group),
                     delegate: SliverChildBuilderDelegate((_, i) => ProductTile(product: items[i], width: double.infinity), childCount: items.length),
                   ),
                 ),

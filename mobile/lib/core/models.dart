@@ -264,8 +264,10 @@ class LineItem {
 }
 
 class CartView {
-  CartView({required this.items, required this.totals, required this.warnings, this.couponCode});
+  CartView({required this.items, required this.totals, required this.warnings, this.couponCode, this.freeDeliveryAbove = 0, this.standardDeliveryFee = 0});
   final List<LineItem> items;
+  /// Store delivery rules from the API: free above this item total, otherwise [standardDeliveryFee].
+  final num freeDeliveryAbove, standardDeliveryFee;
   final Totals totals;
   final List<String> warnings;
   final String? couponCode;
@@ -276,6 +278,8 @@ class CartView {
         totals: Totals.fromJson(j['totals'] as Json),
         warnings: (j['warnings'] as List? ?? const []).cast<String>(),
         couponCode: j['couponCode'] as String?,
+        freeDeliveryAbove: _num((j['delivery'] as Json?)?['freeAbove']),
+        standardDeliveryFee: _num((j['delivery'] as Json?)?['fee']),
       );
   static CartView empty() => CartView(items: const [], totals: Totals(itemTotal: 0, discount: 0, deliveryFee: 0, packagingFee: 0, tax: 0, grandTotal: 0), warnings: const []);
 }
@@ -377,10 +381,12 @@ class OrderSummary {
 }
 
 class AppNotification {
-  AppNotification({required this.id, required this.title, required this.body, required this.kind, required this.read, this.createdAt, this.link});
+  AppNotification({required this.id, required this.title, required this.body, required this.kind, required this.read, this.createdAt, this.link, this.orderId});
   final String id, title, body, kind;
   /// In-app destination, e.g. `/product/{id}` for "Back in stock".
   final String? link;
+  /// Order this is about (order updates, refunds): tapping opens that order.
+  final String? orderId;
   final bool read;
   final DateTime? createdAt;
   factory AppNotification.fromJson(Json j) => AppNotification(
@@ -391,6 +397,7 @@ class AppNotification {
         read: (j['read'] ?? false) as bool,
         createdAt: _date(j['createdAt']),
         link: j['link'] as String?,
+        orderId: j['order'] as String?,
       );
 }
 

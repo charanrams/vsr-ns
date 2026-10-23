@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, type LinkProps, useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { AlertTriangle, Bell, BellRing, ChevronRight, Heart, ImageOff, Loader2, Minus, PackageSearch, Plus, ShoppingCart, Star, WifiOff, X, Zap } from 'lucide-react';
 import { toast } from 'sonner';
@@ -48,10 +48,24 @@ export function Btn({
   );
 }
 
-export function ButtonLink({ to, tone = 'primary', className, children }: { to: string; tone?: BtnTone; className?: string; children: ReactNode }) {
+export function ButtonLink({
+  to,
+  tone = 'primary',
+  className,
+  replace,
+  children,
+  ...rest
+}: {
+  to: string;
+  tone?: BtnTone;
+  className?: string;
+  replace?: boolean;
+  children: ReactNode;
+} & Omit<LinkProps, 'to' | 'className' | 'children' | 'replace'>) {
   return (
     <Link
       to={to}
+      replace={replace}
       className={cx(
         'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition-colors',
         tone === 'primary' && 'bg-brand-900 text-white hover:bg-brand-800',
@@ -60,6 +74,7 @@ export function ButtonLink({ to, tone = 'primary', className, children }: { to: 
         tone === 'ghost' && 'text-brand-700 hover:bg-brand-50',
         className,
       )}
+      {...rest}
     >
       {children}
     </Link>
@@ -469,6 +484,9 @@ const STATUS: Record<string, [string, string]> = {
   resolved: ['Resolved', 'success'],
   default: ['Default', 'success'],
 };
+/** success | warning | danger | info, for tinting surfaces around a status. */
+export const statusTone = (status: string) => STATUS[status]?.[1] ?? 'warning';
+
 export function StatusPill({ status }: { status: string }) {
   const [label, tone] = STATUS[status] ?? [titleCase(status), 'warning'];
   return (
@@ -487,11 +505,15 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
-export function Bill({ totals, count }: { totals: Totals; count?: number }) {
-  const row = (label: string, value: string, cls?: string) => (
+/** `standardDeliveryFee`: shown struck through next to FREE, so the customer sees what free delivery saved. */
+export function Bill({ totals, count, standardDeliveryFee }: { totals: Totals; count?: number; standardDeliveryFee?: number }) {
+  const row = (label: string, value: string, cls?: string, was?: string) => (
     <div className="flex items-baseline justify-between gap-4 py-1.5 text-sm">
       <span className="text-muted">{label}</span>
-      <span className={cx('tabular font-medium', cls)}>{value}</span>
+      <span className={cx('tabular font-medium', cls)}>
+        {was ? <span className="mr-2 font-normal text-muted line-through">{was}</span> : null}
+        {value}
+      </span>
     </div>
   );
   return (
@@ -499,7 +521,7 @@ export function Bill({ totals, count }: { totals: Totals; count?: number }) {
       <h2 className="mb-2 text-base font-extrabold">Bill details</h2>
       {row(`Item total${count ? ` (${count} item${count === 1 ? '' : 's'})` : ''}`, money(totals.itemTotal))}
       {totals.discount > 0 ? row(`Discount${totals.couponCode ? ` (${totals.couponCode})` : ''}`, `−${money(totals.discount)}`, 'text-success') : null}
-      {row('Delivery fee', totals.deliveryFee === 0 ? 'FREE' : money(totals.deliveryFee), totals.deliveryFee === 0 ? 'text-success' : undefined)}
+      {row('Delivery fee', totals.deliveryFee === 0 ? 'FREE' : money(totals.deliveryFee), totals.deliveryFee === 0 ? 'text-success' : undefined, totals.deliveryFee === 0 && standardDeliveryFee ? money(standardDeliveryFee) : undefined)}
       {row('Packaging fee', money(totals.packagingFee))}
       {row('GST (included)', money(totals.tax))}
       <div className="mt-3 flex items-baseline justify-between border-t border-line pt-3">
